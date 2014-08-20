@@ -1057,7 +1057,13 @@ static int wpas_p2p_persistent_group(struct wpa_supplicant *wpa_s,
 		wpa_hexdump(MSG_DEBUG, "P2P: Beacon IEs",
 			    ((u8 *) bss + 1) + bss->ie_len,
 			    bss->beacon_ie_len);
-		return 0;
+#ifdef REALTEK_WIFI_VENDOR
+               wpa_printf(MSG_INFO, "Aries IOT patch : forcing be persistent and bssid " MACSTR " as go_dev_addr!! \n\n", MAC2STR(bssid));
+               memcpy(go_dev_addr, bssid, ETH_ALEN);
+               return 1;
+#else
+               return 0;
+#endif
 	}
 
 	group_capab = p2p_get_group_capab(p2p);
@@ -7083,6 +7089,22 @@ static void wpas_p2p_set_group_idle_timeout(struct wpa_supplicant *wpa_s)
 			return;
 	}
 
+#ifdef REALTEK_WIFI_VENDOR
+
+    timeout = P2P_MAX_CLIENT_IDLE;
+
+    if (wpa_s->current_ssid->mode == WPAS_MODE_INFRA) {
+        if (wpa_s->show_group_started) {
+             wpa_printf(MSG_INFO, "P2P: set P2P group idle timeout to 20s "
+                       "while waiting for initial 4-way handshake to "
+                       "complete");
+             timeout = P2P_MAX_CLIENT_IDLE;
+         } else {
+             timeout = 0;
+         }
+    }
+
+#else //REALTEK_WIFI_VENDOR
 	if (wpa_s->p2p_in_provisioning) {
 		/*
 		 * Use the normal group formation timeout during the
@@ -7093,6 +7115,7 @@ static void wpas_p2p_set_group_idle_timeout(struct wpa_supplicant *wpa_s)
 			   "during provisioning");
 		return;
 	}
+#endif
 
 	if (wpa_s->show_group_started) {
 		/*

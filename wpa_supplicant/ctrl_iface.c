@@ -9015,6 +9015,8 @@ char * wpa_supplicant_ctrl_iface_process(struct wpa_supplicant *wpa_s,
 #endif /* CONFIG_AUTOSCAN */
 #ifdef ANDROID
 	} else if (os_strncmp(buf, "DRIVER ", 7) == 0) {
+        if (os_strncasecmp(buf + 7, "P2P_DISABLE", 11) == 0)
+            wpas_p2p_stop_find(wpa_s);
 		reply_len = wpa_supplicant_driver_cmd(wpa_s, buf + 7, reply,
 						      reply_size);
 #endif /* ANDROID */
