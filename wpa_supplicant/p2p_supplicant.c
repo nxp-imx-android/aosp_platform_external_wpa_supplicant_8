@@ -6159,7 +6159,7 @@ int wpas_p2p_group_add_persistent(struct wpa_supplicant *wpa_s,
 				  int connection_timeout, int force_scan)
 {
 	struct p2p_go_neg_results params;
-	int go = 0, freq;
+	int go = 0, freq = 2;
 
 	if (ssid->disabled != 2 || ssid->ssid == NULL)
 		return -1;
