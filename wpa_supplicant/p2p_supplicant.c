@@ -2018,7 +2018,7 @@ static void wpas_p2p_get_group_ifname(struct wpa_supplicant *wpa_s,
 		ifname_ptr = os_strrchr(wpa_s->ifname, '-') + 1;
 	}
 
-	os_snprintf(ifname, len, "p2p-%s-%d", ifname_ptr, wpa_s->p2p_group_idx);
+	os_snprintf(ifname, len, "p2p-%s-0", ifname_ptr);
 	if (os_strlen(ifname) >= IFNAMSIZ &&
 	    os_strlen(wpa_s->ifname) < IFNAMSIZ) {
 		int res;
