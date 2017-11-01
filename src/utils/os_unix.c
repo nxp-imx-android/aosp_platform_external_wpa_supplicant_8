@@ -12,9 +12,11 @@
 #include <sys/wait.h>
 
 #ifdef ANDROID
+#include <grp.h>
+#include <pwd.h>
 #include <sys/capability.h>
 #include <sys/prctl.h>
-#include <private/android_filesystem_config.h>
+#include <sys/types.h>
 #endif /* ANDROID */
 
 #ifdef __MACH__
@@ -79,6 +81,9 @@ int os_get_reltime(struct os_reltime *t)
 #endif
 	struct timespec ts;
 	int res;
+
+	if (TEST_FAIL())
+		return -1;
 
 	while (1) {
 		res = clock_gettime(clock_id, &ts);
@@ -321,24 +326,42 @@ char * os_rel2abs_path(const char *rel_path)
 int os_program_init(void)
 {
 #ifdef ANDROID
+	struct __user_cap_header_struct header;
+	struct __user_cap_data_struct cap;
+	struct group *grp = getgrnam("wifi");
+	gid_t gid_wifi = grp ? grp->gr_gid : 0;
+	struct passwd *pwd = getpwnam("wifi");
+	uid_t uid_wifi = pwd ? pwd->pw_uid : 0;
+
 	/*
 	 * We ignore errors here since errors are normal if we
 	 * are already running as non-root.
 	 */
 #ifdef ANDROID_SETGROUPS_OVERRIDE
 	gid_t groups[] = { ANDROID_SETGROUPS_OVERRIDE };
+
+	if (!gid_wifi || !uid_wifi) return -1;
 #else /* ANDROID_SETGROUPS_OVERRIDE */
-	gid_t groups[] = { AID_INET, AID_WIFI, AID_KEYSTORE };
+	gid_t groups[3];
+
+	if (!gid_wifi || !uid_wifi) return -1;
+	groups[0] = gid_wifi;
+
+	grp = getgrnam("inet");
+	groups[1] = grp ? grp->gr_gid : 0;
+	if (!groups[1]) return -1;
+
+	grp = getgrnam("keystore");
+	groups[2] = grp ? grp->gr_gid : 0;
+	if (!groups[2]) return -1;
 #endif /* ANDROID_SETGROUPS_OVERRIDE */
-	struct __user_cap_header_struct header;
-	struct __user_cap_data_struct cap;
 
 	setgroups(ARRAY_SIZE(groups), groups);
 
 	prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0);
 
-	setgid(AID_WIFI);
-	setuid(AID_WIFI);
+	setgid(gid_wifi);
+	setuid(uid_wifi);
 
 	header.version = _LINUX_CAPABILITY_VERSION;
 	header.pid = 0;
@@ -505,6 +528,16 @@ int os_memcmp_const(const void *a, const void *b, size_t len)
 }
 
 
+void * os_memdup(const void *src, size_t len)
+{
+	void *r = os_malloc(len);
+
+	if (r)
+		os_memcpy(r, src, len);
+	return r;
+}
+
+
 #ifdef WPA_TRACE
 
 #if defined(WPA_TRACE_BFD) && defined(CONFIG_TESTING_OPTIONS)
@@ -536,6 +569,8 @@ static int testing_fail_alloc(void)
 	if (i < res && os_strcmp(func[i], "os_realloc_array") == 0)
 		i++;
 	if (i < res && os_strcmp(func[i], "os_strdup") == 0)
+		i++;
+	if (i < res && os_strcmp(func[i], "os_memdup") == 0)
 		i++;
 
 	pos = wpa_trace_fail_func;

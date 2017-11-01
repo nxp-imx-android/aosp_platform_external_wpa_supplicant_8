@@ -140,6 +140,51 @@ public:
 	Return<void> setMiracastMode(
 	    ISupplicantP2pIface::MiracastMode mode,
 	    setMiracastMode_cb _hidl_cb) override;
+	Return<void> startWpsPbc(
+	    const hidl_string& groupIfName, const hidl_array<uint8_t, 6>& bssid,
+	    startWpsPbc_cb _hidl_cb) override;
+	Return<void> startWpsPinKeypad(
+	    const hidl_string& groupIfName, const hidl_string& pin,
+	    startWpsPinKeypad_cb _hidl_cb) override;
+	Return<void> startWpsPinDisplay(
+	    const hidl_string& groupIfName, const hidl_array<uint8_t, 6>& bssid,
+	    startWpsPinDisplay_cb _hidl_cb) override;
+	Return<void> cancelWps(
+	    const hidl_string& groupIfName, cancelWps_cb _hidl_cb) override;
+	Return<void> setWpsDeviceName(
+	    const hidl_string& name, setWpsDeviceName_cb _hidl_cb) override;
+	Return<void> setWpsDeviceType(
+	    const hidl_array<uint8_t, 8>& type,
+	    setWpsDeviceType_cb _hidl_cb) override;
+	Return<void> setWpsManufacturer(
+	    const hidl_string& manufacturer,
+	    setWpsManufacturer_cb _hidl_cb) override;
+	Return<void> setWpsModelName(
+	    const hidl_string& model_name,
+	    setWpsModelName_cb _hidl_cb) override;
+	Return<void> setWpsModelNumber(
+	    const hidl_string& model_number,
+	    setWpsModelNumber_cb _hidl_cb) override;
+	Return<void> setWpsSerialNumber(
+	    const hidl_string& serial_number,
+	    setWpsSerialNumber_cb _hidl_cb) override;
+	Return<void> setWpsConfigMethods(
+	    uint16_t config_methods, setWpsConfigMethods_cb _hidl_cb) override;
+	Return<void> enableWfd(bool enable, enableWfd_cb _hidl_cb) override;
+	Return<void> setWfdDeviceInfo(
+	    const hidl_array<uint8_t, 6>& info,
+	    setWfdDeviceInfo_cb _hidl_cb) override;
+	Return<void> createNfcHandoverRequestMessage(
+	    createNfcHandoverRequestMessage_cb _hidl_cb) override;
+	Return<void> createNfcHandoverSelectMessage(
+	    createNfcHandoverSelectMessage_cb _hidl_cb) override;
+	Return<void> reportNfcHandoverResponse(
+	    const hidl_vec<uint8_t>& request,
+	    reportNfcHandoverResponse_cb _hidl_cb) override;
+	Return<void> reportNfcHandoverInitiation(
+	    const hidl_vec<uint8_t>& select,
+	    reportNfcHandoverInitiation_cb _hidl_cb) override;
+	Return<void> saveConfig(saveConfig_cb _hidl_cb) override;
 
 private:
 	// Corresponding worker functions for the HIDL methods.
@@ -212,6 +257,38 @@ private:
 	SupplicantStatus cancelServiceDiscoveryInternal(uint64_t identifier);
 	SupplicantStatus setMiracastModeInternal(
 	    ISupplicantP2pIface::MiracastMode mode);
+	SupplicantStatus startWpsPbcInternal(
+	    const std::string& group_ifname,
+	    const std::array<uint8_t, 6>& bssid);
+	SupplicantStatus startWpsPinKeypadInternal(
+	    const std::string& group_ifname, const std::string& pin);
+	std::pair<SupplicantStatus, std::string> startWpsPinDisplayInternal(
+	    const std::string& group_ifname,
+	    const std::array<uint8_t, 6>& bssid);
+	SupplicantStatus cancelWpsInternal(const std::string& group_ifname);
+	SupplicantStatus setWpsDeviceNameInternal(const std::string& name);
+	SupplicantStatus setWpsDeviceTypeInternal(
+	    const std::array<uint8_t, 8>& type);
+	SupplicantStatus setWpsManufacturerInternal(
+	    const std::string& manufacturer);
+	SupplicantStatus setWpsModelNameInternal(const std::string& model_name);
+	SupplicantStatus setWpsModelNumberInternal(
+	    const std::string& model_number);
+	SupplicantStatus setWpsSerialNumberInternal(
+	    const std::string& serial_number);
+	SupplicantStatus setWpsConfigMethodsInternal(uint16_t config_methods);
+	SupplicantStatus enableWfdInternal(bool enable);
+	SupplicantStatus setWfdDeviceInfoInternal(
+	    const std::array<uint8_t, 6>& info);
+	std::pair<SupplicantStatus, std::vector<uint8_t>>
+	createNfcHandoverRequestMessageInternal();
+	std::pair<SupplicantStatus, std::vector<uint8_t>>
+	createNfcHandoverSelectMessageInternal();
+	SupplicantStatus reportNfcHandoverResponseInternal(
+	    const std::vector<uint8_t>& request);
+	SupplicantStatus reportNfcHandoverInitiationInternal(
+	    const std::vector<uint8_t>& select);
+	SupplicantStatus saveConfigInternal();
 
 	struct wpa_supplicant* retrieveIfacePtr();
 	struct wpa_supplicant* retrieveGroupIfacePtr(

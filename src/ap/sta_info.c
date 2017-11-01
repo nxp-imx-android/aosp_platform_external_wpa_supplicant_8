@@ -1,6 +1,6 @@
 /*
  * hostapd / Station table
- * Copyright (c) 2002-2013, Jouni Malinen <j@w1.fi>
+ * Copyright (c) 2002-2017, Jouni Malinen <j@w1.fi>
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -17,6 +17,7 @@
 #include "radius/radius_client.h"
 #include "p2p/p2p.h"
 #include "fst/fst.h"
+#include "crypto/crypto.h"
 #include "hostapd.h"
 #include "accounting.h"
 #include "ieee802_1x.h"
@@ -36,6 +37,7 @@
 #include "ndisc_snoop.h"
 #include "sta_info.h"
 #include "vlan.h"
+#include "wps_hostapd.h"
 
 static void ap_sta_remove_in_other_bss(struct hostapd_data *hapd,
 				       struct sta_info *sta);
@@ -47,6 +49,7 @@ static void ap_sta_disassoc_cb_timeout(void *eloop_ctx, void *timeout_ctx);
 static void ap_sa_query_timer(void *eloop_ctx, void *timeout_ctx);
 #endif /* CONFIG_IEEE80211W */
 static int ap_sta_remove(struct hostapd_data *hapd, struct sta_info *sta);
+static void ap_sta_delayed_1x_auth_fail_cb(void *eloop_ctx, void *timeout_ctx);
 
 int ap_for_each_sta(struct hostapd_data *hapd,
 		    int (*cb)(struct hostapd_data *hapd, struct sta_info *sta,
@@ -337,6 +340,23 @@ void ap_free_sta(struct hostapd_data *hapd, struct sta_info *sta)
 	mbo_ap_sta_free(sta);
 	os_free(sta->supp_op_classes);
 
+#ifdef CONFIG_FILS
+	os_free(sta->fils_pending_assoc_req);
+	wpabuf_free(sta->fils_hlp_resp);
+	wpabuf_free(sta->hlp_dhcp_discover);
+	eloop_cancel_timeout(fils_hlp_timeout, hapd, sta);
+#ifdef CONFIG_FILS_SK_PFS
+	crypto_ecdh_deinit(sta->fils_ecdh);
+	wpabuf_clear_free(sta->fils_dh_ss);
+	wpabuf_free(sta->fils_g_sta);
+#endif /* CONFIG_FILS_SK_PFS */
+#endif /* CONFIG_FILS */
+
+#ifdef CONFIG_OWE
+	bin_clear_free(sta->owe_pmk, sta->owe_pmk_len);
+	crypto_ecdh_deinit(sta->owe_ecdh);
+#endif /* CONFIG_OWE */
+
 	os_free(sta);
 }
 
@@ -597,7 +617,7 @@ void ap_sta_no_session_timeout(struct hostapd_data *hapd, struct sta_info *sta)
 
 static void ap_handle_session_warning_timer(void *eloop_ctx, void *timeout_ctx)
 {
-#ifdef CONFIG_WNM
+#ifdef CONFIG_WNM_AP
 	struct hostapd_data *hapd = eloop_ctx;
 	struct sta_info *sta = timeout_ctx;
 
@@ -608,7 +628,7 @@ static void ap_handle_session_warning_timer(void *eloop_ctx, void *timeout_ctx)
 
 	wnm_send_ess_disassoc_imminent(hapd, sta, sta->hs20_session_info_url,
 				       sta->hs20_disassoc_timer);
-#endif /* CONFIG_WNM */
+#endif /* CONFIG_WNM_AP */
 }
 
 
@@ -745,9 +765,17 @@ void ap_sta_disassociate(struct hostapd_data *hapd, struct sta_info *sta,
 	wpa_printf(MSG_DEBUG, "%s: disassociate STA " MACSTR,
 		   hapd->conf->iface, MAC2STR(sta->addr));
 	sta->last_seq_ctrl = WLAN_INVALID_MGMT_SEQ;
-	sta->flags &= ~(WLAN_STA_ASSOC | WLAN_STA_ASSOC_REQ_OK);
+	if (hapd->iface->current_mode &&
+	    hapd->iface->current_mode->mode == HOSTAPD_MODE_IEEE80211AD) {
+		/* Skip deauthentication in DMG/IEEE 802.11ad */
+		sta->flags &= ~(WLAN_STA_AUTH | WLAN_STA_ASSOC |
+				WLAN_STA_ASSOC_REQ_OK);
+		sta->timeout_next = STA_REMOVE;
+	} else {
+		sta->flags &= ~(WLAN_STA_ASSOC | WLAN_STA_ASSOC_REQ_OK);
+		sta->timeout_next = STA_DEAUTH;
+	}
 	ap_sta_set_authorized(hapd, sta, 0);
-	sta->timeout_next = STA_DEAUTH;
 	wpa_printf(MSG_DEBUG, "%s: reschedule ap_handle_timer timeout "
 		   "for " MACSTR " (%d seconds - "
 		   "AP_MAX_INACTIVITY_AFTER_DISASSOC)",
@@ -783,6 +811,14 @@ static void ap_sta_deauth_cb_timeout(void *eloop_ctx, void *timeout_ctx)
 void ap_sta_deauthenticate(struct hostapd_data *hapd, struct sta_info *sta,
 			   u16 reason)
 {
+	if (hapd->iface->current_mode &&
+	    hapd->iface->current_mode->mode == HOSTAPD_MODE_IEEE80211AD) {
+		/* Deauthentication is not used in DMG/IEEE 802.11ad;
+		 * disassociate the STA instead. */
+		ap_sta_disassociate(hapd, sta, reason);
+		return;
+	}
+
 	wpa_printf(MSG_DEBUG, "%s: deauthenticate STA " MACSTR,
 		   hapd->conf->iface, MAC2STR(sta->addr));
 	sta->last_seq_ctrl = WLAN_INVALID_MGMT_SEQ;
@@ -1229,6 +1265,20 @@ void ap_sta_disconnect(struct hostapd_data *hapd, struct sta_info *sta,
 			       ap_handle_timer, hapd, sta);
 	sta->timeout_next = STA_REMOVE;
 
+	if (hapd->iface->current_mode &&
+	    hapd->iface->current_mode->mode == HOSTAPD_MODE_IEEE80211AD) {
+		/* Deauthentication is not used in DMG/IEEE 802.11ad;
+		 * disassociate the STA instead. */
+		sta->disassoc_reason = reason;
+		sta->flags |= WLAN_STA_PENDING_DISASSOC_CB;
+		eloop_cancel_timeout(ap_sta_disassoc_cb_timeout, hapd, sta);
+		eloop_register_timeout(hapd->iface->drv_flags &
+				       WPA_DRIVER_FLAGS_DEAUTH_TX_STATUS ?
+				       2 : 0, 0, ap_sta_disassoc_cb_timeout,
+				       hapd, sta);
+		return;
+	}
+
 	sta->deauth_reason = reason;
 	sta->flags |= WLAN_STA_PENDING_DEAUTH_CB;
 	eloop_cancel_timeout(ap_sta_deauth_cb_timeout, hapd, sta);
@@ -1275,6 +1325,15 @@ void ap_sta_clear_disconnect_timeouts(struct hostapd_data *hapd,
 			   "%s: Removed ap_sta_disassoc_cb_timeout timeout for "
 			   MACSTR,
 			   hapd->conf->iface, MAC2STR(sta->addr));
+	if (eloop_cancel_timeout(ap_sta_delayed_1x_auth_fail_cb, hapd, sta) > 0)
+	{
+		wpa_printf(MSG_DEBUG,
+			   "%s: Removed ap_sta_delayed_1x_auth_fail_cb timeout for "
+			   MACSTR,
+			   hapd->conf->iface, MAC2STR(sta->addr));
+		if (sta->flags & WLAN_STA_WPS)
+			hostapd_wps_eap_completed(hapd);
+	}
 }
 
 
@@ -1308,4 +1367,46 @@ int ap_sta_flags_txt(u32 flags, char *buf, size_t buflen)
 		res = -1;
 
 	return res;
+}
+
+
+static void ap_sta_delayed_1x_auth_fail_cb(void *eloop_ctx, void *timeout_ctx)
+{
+	struct hostapd_data *hapd = eloop_ctx;
+	struct sta_info *sta = timeout_ctx;
+
+	wpa_dbg(hapd->msg_ctx, MSG_DEBUG,
+		"IEEE 802.1X: Scheduled disconnection of " MACSTR
+		" after EAP-Failure", MAC2STR(sta->addr));
+
+	ap_sta_disconnect(hapd, sta, sta->addr,
+			  WLAN_REASON_IEEE_802_1X_AUTH_FAILED);
+	if (sta->flags & WLAN_STA_WPS)
+		hostapd_wps_eap_completed(hapd);
+}
+
+
+void ap_sta_delayed_1x_auth_fail_disconnect(struct hostapd_data *hapd,
+					    struct sta_info *sta)
+{
+	wpa_dbg(hapd->msg_ctx, MSG_DEBUG,
+		"IEEE 802.1X: Force disconnection of " MACSTR
+		" after EAP-Failure in 10 ms", MAC2STR(sta->addr));
+
+	/*
+	 * Add a small sleep to increase likelihood of previously requested
+	 * EAP-Failure TX getting out before this should the driver reorder
+	 * operations.
+	 */
+	eloop_cancel_timeout(ap_sta_delayed_1x_auth_fail_cb, hapd, sta);
+	eloop_register_timeout(0, 10000, ap_sta_delayed_1x_auth_fail_cb,
+			       hapd, sta);
+}
+
+
+int ap_sta_pending_delayed_1x_auth_fail_disconnect(struct hostapd_data *hapd,
+						   struct sta_info *sta)
+{
+	return eloop_is_timeout_registered(ap_sta_delayed_1x_auth_fail_cb,
+					   hapd, sta);
 }

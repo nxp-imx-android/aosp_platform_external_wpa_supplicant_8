@@ -532,6 +532,7 @@ ieee802_1x_kay_deinit_receive_sc(
 		ieee802_1x_delete_receive_sa(participant->kay, psa);
 
 	dl_list_del(&psc->list);
+	secy_delete_receive_sc(participant->kay, psc);
 	os_free(psc);
 }
 
@@ -632,6 +633,8 @@ ieee802_1x_kay_move_live_peer(struct ieee802_1x_mka_participant *participant,
 	struct receive_sc *rxsc;
 
 	peer = ieee802_1x_kay_get_potential_peer(participant, mi);
+	if (!peer)
+		return NULL;
 
 	rxsc = ieee802_1x_kay_init_receive_sc(&participant->current_peer_sci);
 	if (!rxsc)
@@ -961,20 +964,18 @@ ieee802_1x_mka_i_in_peerlist(struct ieee802_1x_mka_participant *participant,
 		body_len = get_mka_param_body_len(hdr);
 		body_type = get_mka_param_body_type(hdr);
 
-		if (body_type != MKA_LIVE_PEER_LIST &&
-		    body_type != MKA_POTENTIAL_PEER_LIST)
-			continue;
-
-		ieee802_1x_mka_dump_peer_body(
-			(struct ieee802_1x_mka_peer_body *)pos);
-
-		if (left_len < (MKA_HDR_LEN + body_len + DEFAULT_ICV_LEN)) {
+		if (left_len < (MKA_HDR_LEN + MKA_ALIGN_LENGTH(body_len) + DEFAULT_ICV_LEN)) {
 			wpa_printf(MSG_ERROR,
 				   "KaY: MKA Peer Packet Body Length (%zu bytes) is less than the Parameter Set Header Length (%zu bytes) + the Parameter Set Body Length (%zu bytes) + %d bytes of ICV",
 				   left_len, MKA_HDR_LEN,
-				   body_len, DEFAULT_ICV_LEN);
-			continue;
+				   MKA_ALIGN_LENGTH(body_len),
+				   DEFAULT_ICV_LEN);
+			return FALSE;
 		}
+
+		if (body_type != MKA_LIVE_PEER_LIST &&
+		    body_type != MKA_POTENTIAL_PEER_LIST)
+			continue;
 
 		if ((body_len % 16) != 0) {
 			wpa_printf(MSG_ERROR,
@@ -982,6 +983,9 @@ ieee802_1x_mka_i_in_peerlist(struct ieee802_1x_mka_participant *participant,
 				   body_len);
 			continue;
 		}
+
+		ieee802_1x_mka_dump_peer_body(
+			(struct ieee802_1x_mka_peer_body *)pos);
 
 		for (i = 0; i < body_len;
 		     i += sizeof(struct ieee802_1x_mka_peer_id)) {
@@ -1559,7 +1563,7 @@ ieee802_1x_mka_decode_dist_sak_body(
 		ieee802_1x_cp_connect_authenticated(kay->cp);
 		ieee802_1x_cp_sm_step(kay->cp);
 		wpa_printf(MSG_WARNING, "KaY:The Key server advise no MACsec");
-		participant->to_use_sak = TRUE;
+		participant->to_use_sak = FALSE;
 		return 0;
 	}
 
@@ -1641,6 +1645,7 @@ ieee802_1x_mka_decode_dist_sak_body(
 	ieee802_1x_cp_signal_newsak(kay->cp);
 	ieee802_1x_cp_sm_step(kay->cp);
 
+	kay->rcvd_keys++;
 	participant->to_use_sak = TRUE;
 
 	return 0;
@@ -2360,7 +2365,6 @@ static void ieee802_1x_participant_timer(void *eloop_ctx, void *timeout_ctx)
 					      &participant->rxsc_list,
 					      struct receive_sc, list) {
 				if (sci_equal(&rxsc->sci, &peer->sci)) {
-					secy_delete_receive_sc(kay, rxsc);
 					ieee802_1x_kay_deinit_receive_sc(
 						participant, rxsc);
 				}
@@ -2377,6 +2381,12 @@ static void ieee802_1x_participant_timer(void *eloop_ctx, void *timeout_ctx)
 			participant->advised_capability =
 				MACSEC_CAP_NOT_IMPLEMENTED;
 			participant->to_use_sak = FALSE;
+			participant->ltx = FALSE;
+			participant->lrx = FALSE;
+			participant->otx = FALSE;
+			participant->orx = FALSE;
+			participant->is_key_server = FALSE;
+			participant->is_elected = FALSE;
 			kay->authenticated = TRUE;
 			kay->secured = FALSE;
 			kay->failed = FALSE;
@@ -2421,7 +2431,8 @@ static void ieee802_1x_participant_timer(void *eloop_ctx, void *timeout_ctx)
 		participant->new_sak = FALSE;
 	}
 
-	if (participant->retry_count < MAX_RETRY_CNT) {
+	if (participant->retry_count < MAX_RETRY_CNT ||
+	    participant->mode == PSK) {
 		ieee802_1x_participant_send_mkpdu(participant);
 		participant->retry_count++;
 	}
@@ -2538,6 +2549,7 @@ ieee802_1x_kay_deinit_transmit_sc(
 	dl_list_for_each_safe(psa, tmp, &psc->sa_list, struct transmit_sa, list)
 		ieee802_1x_delete_transmit_sa(participant->kay, psa);
 
+	secy_delete_transmit_sc(participant->kay, psc);
 	os_free(psc);
 }
 
@@ -2821,7 +2833,7 @@ int ieee802_1x_kay_enable_new_info(struct ieee802_1x_kay *kay)
 	if (!principal)
 		return -1;
 
-	if (principal->retry_count < MAX_RETRY_CNT) {
+	if (principal->retry_count < MAX_RETRY_CNT || principal->mode == PSK) {
 		ieee802_1x_participant_send_mkpdu(principal);
 		principal->retry_count++;
 	}
@@ -3007,7 +3019,7 @@ static int ieee802_1x_kay_decode_mkpdu(struct ieee802_1x_kay *kay,
 				   "KaY: MKA Peer Packet Body Length (%zu bytes) is less than the Parameter Set Header Length (%zu bytes) + the Parameter Set Body Length (%zu bytes) + %d bytes of ICV",
 				   left_len, MKA_HDR_LEN,
 				   body_len, DEFAULT_ICV_LEN);
-			continue;
+			return -1;
 		}
 
 		if (handled[body_type])
@@ -3082,13 +3094,14 @@ static void kay_l2_receive(void *ctx, const u8 *src_addr, const u8 *buf,
  */
 struct ieee802_1x_kay *
 ieee802_1x_kay_init(struct ieee802_1x_kay_ctx *ctx, enum macsec_policy policy,
-		    u16 port, const char *ifname, const u8 *addr)
+		    u16 port, u8 priority, const char *ifname, const u8 *addr)
 {
 	struct ieee802_1x_kay *kay;
 
 	kay = os_zalloc(sizeof(*kay));
 	if (!kay) {
 		wpa_printf(MSG_ERROR, "KaY-%s: out of memory", __func__);
+		os_free(ctx);
 		return NULL;
 	}
 
@@ -3105,7 +3118,7 @@ ieee802_1x_kay_init(struct ieee802_1x_kay_ctx *ctx, enum macsec_policy policy,
 	os_strlcpy(kay->if_name, ifname, IFNAMSIZ);
 	os_memcpy(kay->actor_sci.addr, addr, ETH_ALEN);
 	kay->actor_sci.port = host_to_be16(port ? port : 0x0001);
-	kay->actor_priority = DEFAULT_PRIO_NOT_KEY_SERVER;
+	kay->actor_priority = priority;
 
 	/* While actor acts as a key server, shall distribute sakey */
 	kay->dist_kn = 1;
@@ -3123,10 +3136,8 @@ ieee802_1x_kay_init(struct ieee802_1x_kay_ctx *ctx, enum macsec_policy policy,
 	dl_list_init(&kay->participant_list);
 
 	if (policy != DO_NOT_SECURE &&
-	    secy_get_capability(kay, &kay->macsec_capable) < 0) {
-		os_free(kay);
-		return NULL;
-	}
+	    secy_get_capability(kay, &kay->macsec_capable) < 0)
+		goto error;
 
 	if (policy == DO_NOT_SECURE ||
 	    kay->macsec_capable == MACSEC_CAP_NOT_IMPLEMENTED) {
@@ -3153,16 +3164,17 @@ ieee802_1x_kay_init(struct ieee802_1x_kay_ctx *ctx, enum macsec_policy policy,
 	wpa_printf(MSG_DEBUG, "KaY: state machine created");
 
 	/* Initialize the SecY must be prio to CP, as CP will control SecY */
-	secy_init_macsec(kay);
+	if (secy_init_macsec(kay) < 0) {
+		wpa_printf(MSG_DEBUG, "KaY: Could not initialize MACsec");
+		goto error;
+	}
 
 	wpa_printf(MSG_DEBUG, "KaY: secy init macsec done");
 
 	/* init CP */
 	kay->cp = ieee802_1x_cp_sm_init(kay);
-	if (kay->cp == NULL) {
-		ieee802_1x_kay_deinit(kay);
-		return NULL;
-	}
+	if (kay->cp == NULL)
+		goto error;
 
 	if (policy == DO_NOT_SECURE) {
 		ieee802_1x_cp_connect_authenticated(kay->cp);
@@ -3173,12 +3185,15 @@ ieee802_1x_kay_init(struct ieee802_1x_kay_ctx *ctx, enum macsec_policy policy,
 		if (kay->l2_mka == NULL) {
 			wpa_printf(MSG_WARNING,
 				   "KaY: Failed to initialize L2 packet processing for MKA packet");
-			ieee802_1x_kay_deinit(kay);
-			return NULL;
+			goto error;
 		}
 	}
 
 	return kay;
+
+error:
+	ieee802_1x_kay_deinit(kay);
+	return NULL;
 }
 
 
@@ -3361,6 +3376,7 @@ ieee802_1x_kay_create_mka(struct ieee802_1x_kay *kay, struct mka_key_name *ckn,
 		participant->mka_life = MKA_LIFE_TIME / 1000 + time(NULL) +
 			usecs / 1000000;
 	}
+	participant->mode = mode;
 
 	return participant;
 
@@ -3423,10 +3439,8 @@ ieee802_1x_kay_delete_mka(struct ieee802_1x_kay *kay, struct mka_key_name *ckn)
 	while (!dl_list_empty(&participant->rxsc_list)) {
 		rxsc = dl_list_entry(participant->rxsc_list.next,
 				     struct receive_sc, list);
-		secy_delete_receive_sc(kay, rxsc);
 		ieee802_1x_kay_deinit_receive_sc(participant, rxsc);
 	}
-	secy_delete_transmit_sc(kay, participant->txsc);
 	ieee802_1x_kay_deinit_transmit_sc(participant, participant->txsc);
 
 	os_memset(&participant->cak, 0, sizeof(participant->cak));
@@ -3519,3 +3533,51 @@ ieee802_1x_kay_change_cipher_suite(struct ieee802_1x_kay *kay,
 
 	return 0;
 }
+
+
+#ifdef CONFIG_CTRL_IFACE
+/**
+ * ieee802_1x_kay_get_status - Get IEEE 802.1X KaY status details
+ * @sm: Pointer to KaY allocated with ieee802_1x_kay_init()
+ * @buf: Buffer for status information
+ * @buflen: Maximum buffer length
+ * @verbose: Whether to include verbose status information
+ * Returns: Number of bytes written to buf.
+ *
+ * Query KAY status information. This function fills in a text area with current
+ * status information. If the buffer (buf) is not large enough, status
+ * information will be truncated to fit the buffer.
+ */
+int ieee802_1x_kay_get_status(struct ieee802_1x_kay *kay, char *buf,
+			      size_t buflen)
+{
+	int len;
+
+	if (!kay)
+		return 0;
+
+	len = os_snprintf(buf, buflen,
+			  "PAE KaY status=%s\n"
+			  "Authenticated=%s\n"
+			  "Secured=%s\n"
+			  "Failed=%s\n"
+			  "Actor Priority=%u\n"
+			  "Key Server Priority=%u\n"
+			  "Is Key Server=%s\n"
+			  "Number of Keys Distributed=%u\n"
+			  "Number of Keys Received=%u\n",
+			  kay->active ? "Active" : "Not-Active",
+			  kay->authenticated ? "Yes" : "No",
+			  kay->secured ? "Yes" : "No",
+			  kay->failed ? "Yes" : "No",
+			  kay->actor_priority,
+			  kay->key_server_priority,
+			  kay->is_key_server ? "Yes" : "No",
+			  kay->dist_kn - 1,
+			  kay->rcvd_keys);
+	if (os_snprintf_error(buflen, len))
+		return 0;
+
+	return len;
+}
+#endif /* CONFIG_CTRL_IFACE */

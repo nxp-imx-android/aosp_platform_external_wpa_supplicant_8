@@ -53,6 +53,7 @@ struct gas_query_pending {
 		   const struct wpabuf *adv_proto,
 		   const struct wpabuf *resp, u16 status_code);
 	void *ctx;
+	u8 sa[ETH_ALEN];
 };
 
 /**
@@ -63,6 +64,9 @@ struct gas_query {
 	struct dl_list pending; /* struct gas_query_pending */
 	struct gas_query_pending *current;
 	struct wpa_radio_work *work;
+	struct os_reltime last_mac_addr_rand;
+	int last_rand_sa_type;
+	u8 rand_addr[ETH_ALEN];
 };
 
 
@@ -239,10 +243,17 @@ static void gas_query_tx_status(struct wpa_supplicant *wpa_s,
 	}
 	os_get_reltime(&query->last_oper);
 
-	if (result == OFFCHANNEL_SEND_ACTION_SUCCESS) {
+	if (result == OFFCHANNEL_SEND_ACTION_SUCCESS ||
+	    result == OFFCHANNEL_SEND_ACTION_NO_ACK) {
 		eloop_cancel_timeout(gas_query_timeout, gas, query);
-		eloop_register_timeout(GAS_QUERY_TIMEOUT_PERIOD, 0,
-				       gas_query_timeout, gas, query);
+		if (result == OFFCHANNEL_SEND_ACTION_NO_ACK) {
+			wpa_printf(MSG_DEBUG, "GAS: No ACK to GAS request");
+			eloop_register_timeout(0, 250000,
+					       gas_query_timeout, gas, query);
+		} else {
+			eloop_register_timeout(GAS_QUERY_TIMEOUT_PERIOD, 0,
+					       gas_query_timeout, gas, query);
+		}
 		if (query->wait_comeback && !query->retry) {
 			eloop_cancel_timeout(gas_query_rx_comeback_timeout,
 					     gas, query);
@@ -278,8 +289,9 @@ static int gas_query_tx(struct gas_query *gas, struct gas_query_pending *query,
 	};
 
 	wpa_printf(MSG_DEBUG, "GAS: Send action frame to " MACSTR " len=%u "
-		   "freq=%d prot=%d", MAC2STR(query->addr),
-		   (unsigned int) wpabuf_len(req), query->freq, prot);
+		   "freq=%d prot=%d using src addr " MACSTR,
+		   MAC2STR(query->addr), (unsigned int) wpabuf_len(req),
+		   query->freq, prot, MAC2STR(query->sa));
 	if (prot) {
 		u8 *categ = wpabuf_mhead_u8(req);
 		*categ = WLAN_ACTION_PROTECTED_DUAL;
@@ -295,10 +307,12 @@ static int gas_query_tx(struct gas_query *gas, struct gas_query_pending *query,
 		bssid = query->addr;
 	else
 		bssid = wildcard_bssid;
+
 	res = offchannel_send_action(gas->wpa_s, query->freq, query->addr,
-				     gas->wpa_s->own_addr, bssid,
-				     wpabuf_head(req), wpabuf_len(req),
-				     wait_time, gas_query_tx_status, 0);
+				     query->sa, bssid, wpabuf_head(req),
+				     wpabuf_len(req), wait_time,
+				     gas_query_tx_status, 0);
+
 	if (res == 0)
 		query->offchannel_tx_started = 1;
 	return res;
@@ -407,6 +421,7 @@ static void gas_query_rx_initial(struct gas_query *gas,
 	}
 
 	if (comeback_delay) {
+		eloop_cancel_timeout(gas_query_timeout, gas, query);
 		query->wait_comeback = 1;
 		gas_query_tx_comeback_req_delay(gas, query, comeback_delay);
 		return;
@@ -724,6 +739,58 @@ static int gas_query_new_dialog_token(struct gas_query *gas, const u8 *dst)
 }
 
 
+static int gas_query_set_sa(struct gas_query *gas,
+			    struct gas_query_pending *query)
+{
+	struct wpa_supplicant *wpa_s = gas->wpa_s;
+	struct os_reltime now;
+
+	if (!wpa_s->conf->gas_rand_mac_addr ||
+	    !(wpa_s->current_bss ?
+	      (wpa_s->drv_flags &
+	       WPA_DRIVER_FLAGS_MGMT_TX_RANDOM_TA_CONNECTED) :
+	      (wpa_s->drv_flags & WPA_DRIVER_FLAGS_MGMT_TX_RANDOM_TA))) {
+		/* Use own MAC address as the transmitter address */
+		os_memcpy(query->sa, wpa_s->own_addr, ETH_ALEN);
+		return 0;
+	}
+
+	os_get_reltime(&now);
+
+	if (wpa_s->conf->gas_rand_mac_addr == gas->last_rand_sa_type &&
+	    gas->last_mac_addr_rand.sec != 0 &&
+	    !os_reltime_expired(&now, &gas->last_mac_addr_rand,
+				wpa_s->conf->gas_rand_addr_lifetime)) {
+		wpa_printf(MSG_DEBUG,
+			   "GAS: Use the previously selected random transmitter address "
+			   MACSTR, MAC2STR(gas->rand_addr));
+		os_memcpy(query->sa, gas->rand_addr, ETH_ALEN);
+		return 0;
+	}
+
+	if (wpa_s->conf->gas_rand_mac_addr == 1 &&
+	    random_mac_addr(gas->rand_addr) < 0) {
+		wpa_printf(MSG_ERROR, "GAS: Failed to get random address");
+		return -1;
+	}
+
+	if (wpa_s->conf->gas_rand_mac_addr == 2 &&
+	    random_mac_addr_keep_oui(gas->rand_addr) < 0) {
+		wpa_printf(MSG_ERROR,
+			   "GAS: Failed to get random address with same OUI");
+		return -1;
+	}
+
+	wpa_printf(MSG_DEBUG, "GAS: Use a new random transmitter address "
+		   MACSTR, MAC2STR(gas->rand_addr));
+	os_memcpy(query->sa, gas->rand_addr, ETH_ALEN);
+	os_get_reltime(&gas->last_mac_addr_rand);
+	gas->last_rand_sa_type = wpa_s->conf->gas_rand_mac_addr;
+
+	return 0;
+}
+
+
 /**
  * gas_query_req - Request a GAS query
  * @gas: GAS query data from gas_query_init()
@@ -758,6 +825,10 @@ int gas_query_req(struct gas_query *gas, const u8 *dst, int freq,
 		return -1;
 
 	query->gas = gas;
+	if (gas_query_set_sa(gas, query)) {
+		os_free(query);
+		return -1;
+	}
 	os_memcpy(query->addr, dst, ETH_ALEN);
 	query->dialog_token = dialog_token;
 	query->freq = freq;

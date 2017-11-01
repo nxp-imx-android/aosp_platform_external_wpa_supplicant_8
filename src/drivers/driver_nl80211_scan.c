@@ -10,6 +10,7 @@
  */
 
 #include "includes.h"
+#include <time.h>
 #include <netlink/genl/genl.h>
 
 #include "utils/common.h"
@@ -156,10 +157,8 @@ void wpa_driver_nl80211_scan_timeout(void *eloop_ctx, void *timeout_ctx)
 	wpa_printf(MSG_DEBUG, "nl80211: Scan timeout - try to abort it");
 #ifdef CONFIG_DRIVER_NL80211_QCA
 	if (drv->vendor_scan_cookie &&
-	    nl80211_abort_vendor_scan(drv, drv->vendor_scan_cookie) == 0) {
-		drv->vendor_scan_cookie = 0;
+	    nl80211_abort_vendor_scan(drv, drv->vendor_scan_cookie) == 0)
 		return;
-	}
 #endif /* CONFIG_DRIVER_NL80211_QCA */
 	if (!drv->vendor_scan_cookie &&
 	    nl80211_abort_scan(drv->first_bss) == 0)
@@ -268,6 +267,19 @@ nl80211_scan_common(struct i802_bss *bss, u8 cmd,
 				    params->mac_addr_mask))
 				goto fail;
 		}
+	}
+
+	if (params->duration) {
+		if (!(drv->capa.rrm_flags &
+		      WPA_DRIVER_FLAGS_SUPPORT_SET_SCAN_DWELL) ||
+		    nla_put_u16(msg, NL80211_ATTR_MEASUREMENT_DURATION,
+				params->duration))
+			goto fail;
+
+		if (params->duration_mandatory &&
+		    nla_put_flag(msg,
+				 NL80211_ATTR_MEASUREMENT_DURATION_MANDATORY))
+			goto fail;
 	}
 
 	if (scan_flags &&
@@ -551,6 +563,44 @@ int wpa_driver_nl80211_sched_scan(void *priv,
 		nla_nest_end(msg, match_sets);
 	}
 
+	if (params->relative_rssi_set) {
+		struct nl80211_bss_select_rssi_adjust rssi_adjust;
+
+		os_memset(&rssi_adjust, 0, sizeof(rssi_adjust));
+		wpa_printf(MSG_DEBUG, "nl80211: Relative RSSI: %d",
+			   params->relative_rssi);
+		if (nla_put_u32(msg, NL80211_ATTR_SCHED_SCAN_RELATIVE_RSSI,
+				params->relative_rssi))
+			goto fail;
+
+		if (params->relative_adjust_rssi) {
+			int pref_band_set = 1;
+
+			switch (params->relative_adjust_band) {
+			case WPA_SETBAND_5G:
+				rssi_adjust.band = NL80211_BAND_5GHZ;
+				break;
+			case WPA_SETBAND_2G:
+				rssi_adjust.band = NL80211_BAND_2GHZ;
+				break;
+			default:
+				pref_band_set = 0;
+				break;
+			}
+			rssi_adjust.delta = params->relative_adjust_rssi;
+
+			if (pref_band_set &&
+			    nla_put(msg, NL80211_ATTR_SCHED_SCAN_RSSI_ADJUST,
+				    sizeof(rssi_adjust), &rssi_adjust))
+				goto fail;
+		}
+	}
+
+	if (params->sched_scan_start_delay &&
+	    nla_put_u32(msg, NL80211_ATTR_SCHED_SCAN_DELAY,
+			params->sched_scan_start_delay))
+		goto fail;
+
 	ret = send_and_recv_msgs(drv, msg, NULL, NULL);
 
 	/* TODO: if we get an error here, we should fall back to normal scan */
@@ -645,6 +695,9 @@ nl80211_parse_bss_info(struct wpa_driver_nl80211_data *drv,
 		[NL80211_BSS_STATUS] = { .type = NLA_U32 },
 		[NL80211_BSS_SEEN_MS_AGO] = { .type = NLA_U32 },
 		[NL80211_BSS_BEACON_IES] = { .type = NLA_UNSPEC },
+		[NL80211_BSS_PARENT_TSF] = { .type = NLA_U64 },
+		[NL80211_BSS_PARENT_BSSID] = { .type = NLA_UNSPEC },
+		[NL80211_BSS_LAST_SEEN_BOOTTIME] = { .type = NLA_U64 },
 	};
 	struct wpa_scan_res *r;
 	const u8 *ie, *beacon_ie;
@@ -708,6 +761,23 @@ nl80211_parse_bss_info(struct wpa_driver_nl80211_data *drv,
 	}
 	if (bss[NL80211_BSS_SEEN_MS_AGO])
 		r->age = nla_get_u32(bss[NL80211_BSS_SEEN_MS_AGO]);
+	if (bss[NL80211_BSS_LAST_SEEN_BOOTTIME]) {
+		u64 boottime;
+		struct timespec ts;
+
+#ifndef CLOCK_BOOTTIME
+#define CLOCK_BOOTTIME 7
+#endif
+		if (clock_gettime(CLOCK_BOOTTIME, &ts) == 0) {
+			/* Use more accurate boottime information to update the
+			 * scan result age since the driver reports this and
+			 * CLOCK_BOOTTIME is available. */
+			boottime = nla_get_u64(
+				bss[NL80211_BSS_LAST_SEEN_BOOTTIME]);
+			r->age = ((u64) ts.tv_sec * 1000000000 +
+				  ts.tv_nsec - boottime) / 1000000;
+		}
+	}
 	r->ie_len = ie_len;
 	pos = (u8 *) (r + 1);
 	if (ie) {
@@ -728,6 +798,12 @@ nl80211_parse_bss_info(struct wpa_driver_nl80211_data *drv,
 		default:
 			break;
 		}
+	}
+
+	if (bss[NL80211_BSS_PARENT_TSF] && bss[NL80211_BSS_PARENT_BSSID]) {
+		r->parent_tsf = nla_get_u64(bss[NL80211_BSS_PARENT_TSF]);
+		os_memcpy(r->tsf_bssid, nla_data(bss[NL80211_BSS_PARENT_BSSID]),
+			  ETH_ALEN);
 	}
 
 	return r;
@@ -1075,7 +1151,7 @@ int wpa_driver_nl80211_vendor_scan(struct i802_bss *bss,
 	}
 
 	if (scan_flags &&
-	    nla_put_u32(msg, NL80211_ATTR_SCAN_FLAGS, scan_flags))
+	    nla_put_u32(msg, QCA_WLAN_VENDOR_ATTR_SCAN_FLAGS, scan_flags))
 		goto fail;
 
 	if (params->p2p_probe) {
@@ -1100,6 +1176,14 @@ int wpa_driver_nl80211_vendor_scan(struct i802_bss *bss,
 		nla_nest_end(msg, rates);
 
 		if (nla_put_flag(msg, QCA_WLAN_VENDOR_ATTR_SCAN_TX_NO_CCK_RATE))
+			goto fail;
+	}
+
+	if (params->bssid) {
+		wpa_printf(MSG_DEBUG, "nl80211: Scan for a specific BSSID: "
+			   MACSTR, MAC2STR(params->bssid));
+		if (nla_put(msg, QCA_WLAN_VENDOR_ATTR_SCAN_BSSID, ETH_ALEN,
+			    params->bssid))
 			goto fail;
 	}
 
