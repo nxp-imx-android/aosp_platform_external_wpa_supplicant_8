@@ -2,6 +2,7 @@
  * hidl interface for wpa_supplicant daemon
  * Copyright (c) 2004-2016, Jouni Malinen <j@w1.fi>
  * Copyright (c) 2004-2016, Roshan Pius <rpius@google.com>
+ * Copyright (C) 2017 Sony Mobile Communications Inc.
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -9,13 +10,23 @@
 
 #include "hidl_manager.h"
 #include "hidl_return_util.h"
+#include "iface_config_utils.h"
+#include "misc_utils.h"
 #include "p2p_iface.h"
+
+extern "C" {
+#include "ap.h"
+#include "wps_supplicant.h"
+#include "wifi_display.h"
+}
 
 namespace {
 const char kConfigMethodStrPbc[] = "pbc";
 const char kConfigMethodStrDisplay[] = "display";
 const char kConfigMethodStrKeypad[] = "keypad";
 constexpr char kSetMiracastMode[] = "MIRACAST ";
+constexpr uint8_t kWfdDeviceInfoSubelemId = 0;
+constexpr char kWfdDeviceInfoSubelemLenHexStr[] = "0006";
 
 using android::hardware::wifi::supplicant::V1_0::ISupplicantP2pIface;
 uint8_t convertHidlMiracastModeToInternal(
@@ -348,6 +359,152 @@ Return<void> P2pIface::setMiracastMode(
 	    &P2pIface::setMiracastModeInternal, _hidl_cb, mode);
 }
 
+Return<void> P2pIface::startWpsPbc(
+    const hidl_string& group_ifname, const hidl_array<uint8_t, 6>& bssid,
+    startWpsPbc_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::startWpsPbcInternal, _hidl_cb, group_ifname, bssid);
+}
+
+Return<void> P2pIface::startWpsPinKeypad(
+    const hidl_string& group_ifname, const hidl_string& pin,
+    startWpsPinKeypad_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::startWpsPinKeypadInternal, _hidl_cb, group_ifname, pin);
+}
+
+Return<void> P2pIface::startWpsPinDisplay(
+    const hidl_string& group_ifname, const hidl_array<uint8_t, 6>& bssid,
+    startWpsPinDisplay_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::startWpsPinDisplayInternal, _hidl_cb, group_ifname,
+	    bssid);
+}
+
+Return<void> P2pIface::cancelWps(
+    const hidl_string& group_ifname, cancelWps_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::cancelWpsInternal, _hidl_cb, group_ifname);
+}
+
+Return<void> P2pIface::setWpsDeviceName(
+    const hidl_string& name, setWpsDeviceName_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::setWpsDeviceNameInternal, _hidl_cb, name);
+}
+
+Return<void> P2pIface::setWpsDeviceType(
+    const hidl_array<uint8_t, 8>& type, setWpsDeviceType_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::setWpsDeviceTypeInternal, _hidl_cb, type);
+}
+
+Return<void> P2pIface::setWpsManufacturer(
+    const hidl_string& manufacturer, setWpsManufacturer_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::setWpsManufacturerInternal, _hidl_cb, manufacturer);
+}
+
+Return<void> P2pIface::setWpsModelName(
+    const hidl_string& model_name, setWpsModelName_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::setWpsModelNameInternal, _hidl_cb, model_name);
+}
+
+Return<void> P2pIface::setWpsModelNumber(
+    const hidl_string& model_number, setWpsModelNumber_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::setWpsModelNumberInternal, _hidl_cb, model_number);
+}
+
+Return<void> P2pIface::setWpsSerialNumber(
+    const hidl_string& serial_number, setWpsSerialNumber_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::setWpsSerialNumberInternal, _hidl_cb, serial_number);
+}
+
+Return<void> P2pIface::setWpsConfigMethods(
+    uint16_t config_methods, setWpsConfigMethods_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::setWpsConfigMethodsInternal, _hidl_cb, config_methods);
+}
+
+Return<void> P2pIface::enableWfd(bool enable, enableWfd_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::enableWfdInternal, _hidl_cb, enable);
+}
+
+Return<void> P2pIface::setWfdDeviceInfo(
+    const hidl_array<uint8_t, 6>& info, setWfdDeviceInfo_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::setWfdDeviceInfoInternal, _hidl_cb, info);
+}
+
+Return<void> P2pIface::createNfcHandoverRequestMessage(
+    createNfcHandoverRequestMessage_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::createNfcHandoverRequestMessageInternal, _hidl_cb);
+}
+
+Return<void> P2pIface::createNfcHandoverSelectMessage(
+    createNfcHandoverSelectMessage_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::createNfcHandoverSelectMessageInternal, _hidl_cb);
+}
+
+Return<void> P2pIface::reportNfcHandoverResponse(
+    const hidl_vec<uint8_t>& request, reportNfcHandoverResponse_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::reportNfcHandoverResponseInternal, _hidl_cb, request);
+}
+
+Return<void> P2pIface::reportNfcHandoverInitiation(
+    const hidl_vec<uint8_t>& select, reportNfcHandoverInitiation_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::reportNfcHandoverInitiationInternal, _hidl_cb, select);
+}
+
+Return<void> P2pIface::saveConfig(saveConfig_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &P2pIface::saveConfigInternal, _hidl_cb);
+}
+
 std::pair<SupplicantStatus, std::string> P2pIface::getNameInternal()
 {
 	return {{SupplicantStatusCode::SUCCESS, ""}, ifname_};
@@ -438,7 +595,7 @@ P2pIface::getDeviceAddressInternal()
 	std::array<uint8_t, 6> addr;
 	static_assert(ETH_ALEN == addr.size(), "Size mismatch");
 	os_memcpy(addr.data(), wpa_s->global->p2p_dev_addr, ETH_ALEN);
-	return {{SupplicantStatusCode::SUCCESS, ""}, {}};
+	return {{SupplicantStatusCode::SUCCESS, ""}, addr};
 }
 
 SupplicantStatus P2pIface::setSsidPostfixInternal(
@@ -527,6 +684,7 @@ std::pair<SupplicantStatus, std::string> P2pIface::connectInternal(
 	if (go_intent > 15) {
 		return {{SupplicantStatusCode::FAILURE_ARGS_INVALID, ""}, {}};
 	}
+	int go_intent_signed = join_existing_group ? -1 : go_intent;
 	p2p_wps_method wps_method = {};
 	switch (provision_method) {
 	case WpsProvisionMethod::PBC:
@@ -539,9 +697,10 @@ std::pair<SupplicantStatus, std::string> P2pIface::connectInternal(
 		wps_method = WPS_PIN_KEYPAD;
 		break;
 	}
+	const char* pin = pre_selected_pin.length() > 0 ? pre_selected_pin.data() : nullptr;
 	int new_pin = wpas_p2p_connect(
-	    wpa_s, peer_address.data(), pre_selected_pin.data(), wps_method,
-	    persistent, false, join_existing_group, false, go_intent, 0, 0, -1,
+	    wpa_s, peer_address.data(), pin, wps_method,
+	    persistent, false, join_existing_group, false, go_intent_signed, 0, 0, -1,
 	    false, false, false, VHT_CHANWIDTH_USE_HT, nullptr, 0);
 	if (new_pin < 0) {
 		return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, {}};
@@ -549,8 +708,7 @@ std::pair<SupplicantStatus, std::string> P2pIface::connectInternal(
 	std::string pin_ret;
 	if (provision_method == WpsProvisionMethod::DISPLAY &&
 	    pre_selected_pin.empty()) {
-		pin_ret.reserve(9);
-		snprintf(&pin_ret[0], pin_ret.size(), "%08d", new_pin);
+		pin_ret = misc_utils::convertWpsPinToString(new_pin);
 	}
 	return {{SupplicantStatusCode::SUCCESS, ""}, pin_ret};
 }
@@ -703,21 +861,22 @@ SupplicantStatus P2pIface::setListenChannelInternal(
 SupplicantStatus P2pIface::setDisallowedFrequenciesInternal(
     const std::vector<FreqRange>& ranges)
 {
-	if (ranges.size() == 0) {
-		return {SupplicantStatusCode::FAILURE_ARGS_INVALID, ""};
-	}
 	struct wpa_supplicant* wpa_s = retrieveIfacePtr();
 	using DestT = struct wpa_freq_range_list::wpa_freq_range;
-	DestT* freq_ranges =
-	    static_cast<DestT*>(os_malloc(sizeof(DestT) * ranges.size()));
-	if (!freq_ranges) {
-		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
-	}
-	uint32_t i = 0;
-	for (const auto& range : ranges) {
-		freq_ranges[i].min = range.min;
-		freq_ranges[i].max = range.max;
-		i++;
+	DestT* freq_ranges = nullptr;
+	// Empty ranges is used to enable all frequencies.
+	if (ranges.size() != 0) {
+		freq_ranges =
+		    static_cast<DestT*>(os_malloc(sizeof(DestT) * ranges.size()));
+		if (!freq_ranges) {
+			return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+		}
+		uint32_t i = 0;
+		for (const auto& range : ranges) {
+			freq_ranges[i].min = range.min;
+			freq_ranges[i].max = range.max;
+			i++;
+		}
 	}
 
 	os_free(wpa_s->global->p2p_disallow_freq.range);
@@ -764,24 +923,19 @@ SupplicantStatus P2pIface::addBonjourServiceInternal(
     const std::vector<uint8_t>& query, const std::vector<uint8_t>& response)
 {
 	struct wpa_supplicant* wpa_s = retrieveIfacePtr();
-	struct wpabuf* query_buf = wpabuf_alloc(query.size());
-	if (!query_buf) {
+	auto query_buf = misc_utils::convertVectorToWpaBuf(query);
+	auto response_buf = misc_utils::convertVectorToWpaBuf(response);
+	if (!query_buf || !response_buf) {
 		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
 	}
-	wpabuf_put_data(query_buf, query.data(), query.size());
-
-	struct wpabuf* response_buf = wpabuf_alloc(response.size());
-	if (!query_buf) {
-		wpabuf_free(query_buf);
+	if (wpas_p2p_service_add_bonjour(
+		wpa_s, query_buf.get(), response_buf.get())) {
 		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
 	}
-	wpabuf_put_data(response_buf, response.data(), response.size());
-
-	if (wpas_p2p_service_add_bonjour(wpa_s, query_buf, response_buf)) {
-		wpabuf_free(query_buf);
-		wpabuf_free(response_buf);
-		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
-	}
+	// If successful, the wpabuf is referenced internally and hence should
+	// not be freed.
+	query_buf.release();
+	response_buf.release();
 	return {SupplicantStatusCode::SUCCESS, ""};
 }
 
@@ -789,15 +943,11 @@ SupplicantStatus P2pIface::removeBonjourServiceInternal(
     const std::vector<uint8_t>& query)
 {
 	struct wpa_supplicant* wpa_s = retrieveIfacePtr();
-	struct wpabuf* query_buf = wpabuf_alloc(query.size());
+	auto query_buf = misc_utils::convertVectorToWpaBuf(query);
 	if (!query_buf) {
 		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
 	}
-	wpabuf_put_data(query_buf, query.data(), query.size());
-
-	int ret = wpas_p2p_service_del_bonjour(wpa_s, query_buf);
-	wpabuf_free(query_buf);
-	if (ret) {
+	if (wpas_p2p_service_del_bonjour(wpa_s, query_buf.get())) {
 		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
 	}
 	return {SupplicantStatusCode::SUCCESS, ""};
@@ -835,14 +985,15 @@ std::pair<SupplicantStatus, uint64_t> P2pIface::requestServiceDiscoveryInternal(
     const std::vector<uint8_t>& query)
 {
 	struct wpa_supplicant* wpa_s = retrieveIfacePtr();
-	struct wpabuf* query_buf = wpabuf_alloc(query.size());
+	auto query_buf = misc_utils::convertVectorToWpaBuf(query);
 	if (!query_buf) {
 		return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, {}};
 	}
-	wpabuf_put_data(query_buf, query.data(), query.size());
+	const uint8_t* dst_addr = is_zero_ether_addr(peer_address.data())
+				      ? nullptr
+				      : peer_address.data();
 	uint64_t identifier =
-	    wpas_p2p_sd_request(wpa_s, peer_address.data(), query_buf);
-	wpabuf_free(query_buf);
+	    wpas_p2p_sd_request(wpa_s, dst_addr, query_buf.get());
 	if (identifier == 0) {
 		return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, {}};
 	}
@@ -871,6 +1022,233 @@ SupplicantStatus P2pIface::setMiracastModeInternal(
 	if (wpa_drv_driver_cmd(
 		wpa_s, cmd.data(), driver_cmd_reply_buf,
 		sizeof(driver_cmd_reply_buf))) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+SupplicantStatus P2pIface::startWpsPbcInternal(
+    const std::string& group_ifname, const std::array<uint8_t, 6>& bssid)
+{
+	struct wpa_supplicant* wpa_group_s =
+	    retrieveGroupIfacePtr(group_ifname);
+	if (!wpa_group_s) {
+		return {SupplicantStatusCode::FAILURE_IFACE_UNKNOWN, ""};
+	}
+	const uint8_t* bssid_addr =
+	    is_zero_ether_addr(bssid.data()) ? nullptr : bssid.data();
+#ifdef CONFIG_AP
+	if (wpa_group_s->ap_iface) {
+		if (wpa_supplicant_ap_wps_pbc(wpa_group_s, bssid_addr, NULL)) {
+			return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+		}
+		return {SupplicantStatusCode::SUCCESS, ""};
+	}
+#endif /* CONFIG_AP */
+	if (wpas_wps_start_pbc(wpa_group_s, bssid_addr, 0)) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+SupplicantStatus P2pIface::startWpsPinKeypadInternal(
+    const std::string& group_ifname, const std::string& pin)
+{
+	struct wpa_supplicant* wpa_group_s =
+	    retrieveGroupIfacePtr(group_ifname);
+	if (!wpa_group_s) {
+		return {SupplicantStatusCode::FAILURE_IFACE_UNKNOWN, ""};
+	}
+#ifdef CONFIG_AP
+	if (wpa_group_s->ap_iface) {
+		if (wpa_supplicant_ap_wps_pin(
+				wpa_group_s, nullptr, pin.c_str(), nullptr, 0, 0) < 0) {
+			return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+		}
+		return {SupplicantStatusCode::SUCCESS, ""};
+	}
+#endif /* CONFIG_AP */
+	if (wpas_wps_start_pin(
+		wpa_group_s, nullptr, pin.c_str(), 0, DEV_PW_DEFAULT)) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+std::pair<SupplicantStatus, std::string> P2pIface::startWpsPinDisplayInternal(
+    const std::string& group_ifname, const std::array<uint8_t, 6>& bssid)
+{
+	struct wpa_supplicant* wpa_group_s =
+	    retrieveGroupIfacePtr(group_ifname);
+	if (!wpa_group_s) {
+		return {{SupplicantStatusCode::FAILURE_IFACE_UNKNOWN, ""}, ""};
+	}
+	const uint8_t* bssid_addr =
+	    is_zero_ether_addr(bssid.data()) ? nullptr : bssid.data();
+	int pin = wpas_wps_start_pin(
+	    wpa_group_s, bssid_addr, nullptr, 0, DEV_PW_DEFAULT);
+	if (pin < 0) {
+		return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+	}
+	return {{SupplicantStatusCode::SUCCESS, ""},
+		misc_utils::convertWpsPinToString(pin)};
+}
+
+SupplicantStatus P2pIface::cancelWpsInternal(const std::string& group_ifname)
+{
+	struct wpa_supplicant* wpa_group_s =
+	    retrieveGroupIfacePtr(group_ifname);
+	if (!wpa_group_s) {
+		return {SupplicantStatusCode::FAILURE_IFACE_UNKNOWN, ""};
+	}
+	if (wpas_wps_cancel(wpa_group_s)) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+SupplicantStatus P2pIface::setWpsDeviceNameInternal(const std::string& name)
+{
+	return iface_config_utils::setWpsDeviceName(retrieveIfacePtr(), name);
+}
+
+SupplicantStatus P2pIface::setWpsDeviceTypeInternal(
+    const std::array<uint8_t, 8>& type)
+{
+	return iface_config_utils::setWpsDeviceType(retrieveIfacePtr(), type);
+}
+
+SupplicantStatus P2pIface::setWpsManufacturerInternal(
+    const std::string& manufacturer)
+{
+	return iface_config_utils::setWpsManufacturer(
+	    retrieveIfacePtr(), manufacturer);
+}
+
+SupplicantStatus P2pIface::setWpsModelNameInternal(
+    const std::string& model_name)
+{
+	return iface_config_utils::setWpsModelName(
+	    retrieveIfacePtr(), model_name);
+}
+
+SupplicantStatus P2pIface::setWpsModelNumberInternal(
+    const std::string& model_number)
+{
+	return iface_config_utils::setWpsModelNumber(
+	    retrieveIfacePtr(), model_number);
+}
+
+SupplicantStatus P2pIface::setWpsSerialNumberInternal(
+    const std::string& serial_number)
+{
+	return iface_config_utils::setWpsSerialNumber(
+	    retrieveIfacePtr(), serial_number);
+}
+
+SupplicantStatus P2pIface::setWpsConfigMethodsInternal(uint16_t config_methods)
+{
+	return iface_config_utils::setWpsConfigMethods(
+	    retrieveIfacePtr(), config_methods);
+}
+
+SupplicantStatus P2pIface::enableWfdInternal(bool enable)
+{
+	struct wpa_supplicant* wpa_s = retrieveIfacePtr();
+	wifi_display_enable(wpa_s->global, enable);
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+SupplicantStatus P2pIface::setWfdDeviceInfoInternal(
+    const std::array<uint8_t, 6>& info)
+{
+	struct wpa_supplicant* wpa_s = retrieveIfacePtr();
+	std::vector<char> wfd_device_info_hex(info.size() * 2 + 1);
+	wpa_snprintf_hex(
+	    wfd_device_info_hex.data(), wfd_device_info_hex.size(), info.data(),
+	    info.size());
+	// |wifi_display_subelem_set| expects the first 2 bytes
+	// to hold the lenght of the subelement. In this case it's
+	// fixed to 6, so prepend that.
+	std::string wfd_device_info_set_cmd_str =
+	    std::to_string(kWfdDeviceInfoSubelemId) + " " +
+	    kWfdDeviceInfoSubelemLenHexStr + wfd_device_info_hex.data();
+	std::vector<char> wfd_device_info_set_cmd(
+	    wfd_device_info_set_cmd_str.c_str(),
+	    wfd_device_info_set_cmd_str.c_str() +
+		wfd_device_info_set_cmd_str.size() + 1);
+	if (wifi_display_subelem_set(
+		wpa_s->global, wfd_device_info_set_cmd.data())) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+std::pair<SupplicantStatus, std::vector<uint8_t>>
+P2pIface::createNfcHandoverRequestMessageInternal()
+{
+	struct wpa_supplicant* wpa_s = retrieveIfacePtr();
+	auto buf = misc_utils::createWpaBufUniquePtr(
+	    wpas_p2p_nfc_handover_req(wpa_s, 1));
+	if (!buf) {
+		return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, {}};
+	}
+	return {{SupplicantStatusCode::SUCCESS, ""},
+		misc_utils::convertWpaBufToVector(buf.get())};
+}
+
+std::pair<SupplicantStatus, std::vector<uint8_t>>
+P2pIface::createNfcHandoverSelectMessageInternal()
+{
+	struct wpa_supplicant* wpa_s = retrieveIfacePtr();
+	auto buf = misc_utils::createWpaBufUniquePtr(
+	    wpas_p2p_nfc_handover_sel(wpa_s, 1, 0));
+	if (!buf) {
+		return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, {}};
+	}
+	return {{SupplicantStatusCode::SUCCESS, ""},
+		misc_utils::convertWpaBufToVector(buf.get())};
+}
+
+SupplicantStatus P2pIface::reportNfcHandoverResponseInternal(
+    const std::vector<uint8_t>& request)
+{
+	struct wpa_supplicant* wpa_s = retrieveIfacePtr();
+	auto req = misc_utils::convertVectorToWpaBuf(request);
+	auto sel = misc_utils::convertVectorToWpaBuf(std::vector<uint8_t>{0});
+	if (!req || !sel) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+
+	if (wpas_p2p_nfc_report_handover(wpa_s, 0, req.get(), sel.get(), 0)) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+SupplicantStatus P2pIface::reportNfcHandoverInitiationInternal(
+    const std::vector<uint8_t>& select)
+{
+	struct wpa_supplicant* wpa_s = retrieveIfacePtr();
+	auto req = misc_utils::convertVectorToWpaBuf(std::vector<uint8_t>{0});
+	auto sel = misc_utils::convertVectorToWpaBuf(select);
+	if (!req || !sel) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+
+	if (wpas_p2p_nfc_report_handover(wpa_s, 1, req.get(), sel.get(), 0)) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+SupplicantStatus P2pIface::saveConfigInternal()
+{
+	struct wpa_supplicant* wpa_s = retrieveIfacePtr();
+	if (!wpa_s->conf->update_config) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	if (wpa_config_write(wpa_s->confname, wpa_s->conf)) {
 		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
 	}
 	return {SupplicantStatusCode::SUCCESS, ""};

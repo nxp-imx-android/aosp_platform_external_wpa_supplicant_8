@@ -27,6 +27,9 @@ L_CFLAGS += -DANDROID_LOG_NAME=\"hostapd\"
 # Disable unused parameter warnings
 L_CFLAGS += -Wno-unused-parameter
 
+# Disable macro redefined warnings
+L_CFLAGS += -Wno-macro-redefined
+
 # Set Android extended P2P functionality
 L_CFLAGS += -DANDROID_P2P
 
@@ -215,11 +218,6 @@ L_CFLAGS += -DCONFIG_RSN_PREAUTH
 CONFIG_L2_PACKET=y
 endif
 
-ifdef CONFIG_PEERKEY
-L_CFLAGS += -DCONFIG_PEERKEY
-OBJS += src/ap/peerkey_auth.c
-endif
-
 ifdef CONFIG_HS20
 NEED_AES_OMAC1=y
 CONFIG_PROXYARP=y
@@ -252,6 +250,15 @@ OBJS += src/ap/wpa_auth_ft.c
 NEED_SHA256=y
 NEED_AES_OMAC1=y
 NEED_AES_UNWRAP=y
+NEED_AES_SIV=y
+NEED_ETH_P_OUI=y
+NEED_SHA256=y
+NEED_HMAC_SHA256_KDF=y
+endif
+
+ifdef NEED_ETH_P_OUI
+L_CFLAGS += -DCONFIG_ETH_P_OUI
+OBJS += src/ap/eth_p_oui.c
 endif
 
 ifdef CONFIG_SAE
@@ -261,15 +268,30 @@ NEED_ECC=y
 NEED_DH_GROUPS=y
 endif
 
+ifdef CONFIG_OWE
+L_CFLAGS += -DCONFIG_OWE
+NEED_ECC=y
+NEED_HMAC_SHA256_KDF=y
+NEED_HMAC_SHA384_KDF=y
+NEED_HMAC_SHA512_KDF=y
+NEED_SHA256=y
+NEED_SHA384=y
+NEED_SHA512=y
+endif
+
 ifdef CONFIG_FILS
 L_CFLAGS += -DCONFIG_FILS
-NEED_CRC32=y
+OBJS += src/ap/fils_hlp.c
 NEED_SHA384=y
 NEED_AES_SIV=y
+ifdef CONFIG_FILS_SK_PFS
+L_CFLAGS += -DCONFIG_FILS_SK_PFS
+NEED_ECC=y
+endif
 endif
 
 ifdef CONFIG_WNM
-L_CFLAGS += -DCONFIG_WNM
+L_CFLAGS += -DCONFIG_WNM -DCONFIG_WNM_AP
 OBJS += src/ap/wnm_ap.c
 endif
 
@@ -279,6 +301,10 @@ endif
 
 ifdef CONFIG_IEEE80211AC
 L_CFLAGS += -DCONFIG_IEEE80211AC
+endif
+
+ifdef CONFIG_IEEE80211AX
+L_CFLAGS += -DCONFIG_IEEE80211AX
 endif
 
 ifdef CONFIG_MBO
@@ -509,6 +535,23 @@ endif
 
 endif
 
+ifdef CONFIG_DPP
+L_CFLAGS += -DCONFIG_DPP
+OBJS += src/common/dpp.c
+OBJS += src/ap/dpp_hostapd.c
+OBJS += src/ap/gas_query_ap.c
+NEED_AES_SIV=y
+NEED_HMAC_SHA256_KDF=y
+NEED_HMAC_SHA384_KDF=y
+NEED_HMAC_SHA512_KDF=y
+NEED_SHA256=y
+NEED_SHA384=y
+NEED_SHA512=y
+NEED_JSON=y
+NEED_GAS=y
+NEED_BASE64=y
+endif
+
 ifdef CONFIG_EAP_IKEV2
 L_CFLAGS += -DEAP_SERVER_IKEV2
 OBJS += src/eap_server/eap_server_ikev2.c src/eap_server/ikev2.c
@@ -591,6 +634,10 @@ NEED_SHA256=y
 NEED_TLS_PRF_SHA256=y
 LIBS += -lcrypto
 LIBS_h += -lcrypto
+ifndef CONFIG_TLS_DEFAULT_CIPHERS
+CONFIG_TLS_DEFAULT_CIPHERS = "DEFAULT:!EXP:!LOW"
+endif
+L_CFLAGS += -DTLS_DEFAULT_CIPHERS=\"$(CONFIG_TLS_DEFAULT_CIPHERS)\"
 endif
 
 ifeq ($(CONFIG_TLS), gnutls)
@@ -725,6 +772,12 @@ endif
 ifdef NEED_AES_EAX
 AESOBJS += src/crypto/aes-eax.c
 NEED_AES_CTR=y
+NEED_AES_OMAC1=y
+endif
+ifdef NEED_AES_SIV
+AESOBJS += src/crypto/aes-siv.c
+NEED_AES_CTR=y
+NEED_AES_OMAC1=y
 endif
 ifdef NEED_AES_CTR
 AESOBJS += src/crypto/aes-ctr.c
@@ -746,9 +799,6 @@ NEED_AES_DEC=y
 ifneq ($(CONFIG_TLS), openssl)
 AESOBJS += src/crypto/aes-cbc.c
 endif
-endif
-ifdef NEED_AES_SIV
-AESOBJS += src/crypto/aes-siv.c
 endif
 ifdef NEED_AES_DEC
 ifdef CONFIG_INTERNAL_AES
@@ -833,10 +883,31 @@ endif
 ifdef NEED_TLS_PRF_SHA256
 OBJS += src/crypto/sha256-tlsprf.c
 endif
+ifdef NEED_HMAC_SHA256_KDF
+OBJS += src/crypto/sha256-kdf.c
+endif
+ifdef NEED_HMAC_SHA384_KDF
+OBJS += src/crypto/sha384-kdf.c
+endif
+ifdef NEED_HMAC_SHA512_KDF
+OBJS += src/crypto/sha512-kdf.c
+endif
 endif
 ifdef NEED_SHA384
 L_CFLAGS += -DCONFIG_SHA384
+ifneq ($(CONFIG_TLS), openssl)
+OBJS += src/crypto/sha384.c
+endif
 OBJS += src/crypto/sha384-prf.c
+endif
+ifdef NEED_SHA512
+L_CFLAGS += -DCONFIG_SHA512
+ifneq ($(CONFIG_TLS), openssl)
+ifneq ($(CONFIG_TLS), linux)
+OBJS += src/crypto/sha512.c
+endif
+endif
+OBJS += src/crypto/sha512-prf.c
 endif
 
 ifdef CONFIG_INTERNAL_SHA384
@@ -863,10 +934,6 @@ endif
 
 ifdef NEED_ECC
 L_CFLAGS += -DCONFIG_ECC
-endif
-
-ifdef NEED_CRC32
-OBJS += src/utils/crc32.c
 endif
 
 ifdef CONFIG_NO_RANDOM_POOL
@@ -898,6 +965,11 @@ ifdef NEED_BASE64
 OBJS += src/utils/base64.c
 endif
 
+ifdef NEED_JSON
+OBJS += src/utils/json.c
+L_CFLAGS += -DCONFIG_JSON
+endif
+
 ifdef NEED_AP_MLME
 OBJS += src/ap/wmm.c
 OBJS += src/ap/ap_list.c
@@ -914,6 +986,10 @@ ifdef CONFIG_IEEE80211AC
 OBJS += src/ap/ieee802_11_vht.c
 endif
 
+ifdef CONFIG_IEEE80211AX
+OBJS += src/ap/ieee802_11_he.c
+endif
+
 ifdef CONFIG_P2P_MANAGER
 L_CFLAGS += -DCONFIG_P2P_MANAGER
 OBJS += src/ap/p2p_hostapd.c
@@ -927,6 +1003,10 @@ endif
 
 ifdef CONFIG_INTERWORKING
 L_CFLAGS += -DCONFIG_INTERWORKING
+NEED_GAS=y
+endif
+
+ifdef NEED_GAS
 OBJS += src/common/gas.c
 OBJS += src/ap/gas_serv.c
 endif
@@ -950,6 +1030,10 @@ endif
 
 ifdef CONFIG_NO_STDOUT_DEBUG
 L_CFLAGS += -DCONFIG_NO_STDOUT_DEBUG
+endif
+
+ifdef CONFIG_DEBUG_SYSLOG
+L_CFLAGS += -DCONFIG_DEBUG_SYSLOG
 endif
 
 ifdef CONFIG_DEBUG_LINUX_TRACING
@@ -985,6 +1069,7 @@ endif
 include $(CLEAR_VARS)
 LOCAL_MODULE := hostapd_cli
 LOCAL_MODULE_TAGS := debug
+LOCAL_PROPRIETARY_MODULE := true
 LOCAL_SHARED_LIBRARIES := libc libcutils liblog
 LOCAL_CFLAGS := $(L_CFLAGS)
 LOCAL_SRC_FILES := $(OBJS_c)
@@ -995,6 +1080,7 @@ include $(BUILD_EXECUTABLE)
 include $(CLEAR_VARS)
 LOCAL_MODULE := hostapd
 LOCAL_MODULE_TAGS := optional
+LOCAL_PROPRIETARY_MODULE := true
 ifdef CONFIG_DRIVER_CUSTOM
 LOCAL_STATIC_LIBRARIES := libCustomWifi
 endif

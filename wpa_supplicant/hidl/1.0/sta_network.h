@@ -76,6 +76,8 @@ public:
 	    setPairwiseCipher_cb _hidl_cb) override;
 	Return<void> setPskPassphrase(
 	    const hidl_string& psk, setPskPassphrase_cb _hidl_cb) override;
+	Return<void> setPsk(
+	    const hidl_array<uint8_t, 32>& psk, setPsk_cb _hidl_cb) override;
 	Return<void> setWepKey(
 	    uint32_t key_idx, const hidl_vec<uint8_t>& wep_key,
 	    setWepKey_cb _hidl_cb) override;
@@ -104,8 +106,8 @@ public:
 	    const hidl_string& path, setEapCAPath_cb _hidl_cb) override;
 	Return<void> setEapClientCert(
 	    const hidl_string& path, setEapClientCert_cb _hidl_cb) override;
-	Return<void> setEapPrivateKey(
-	    const hidl_string& path, setEapPrivateKey_cb _hidl_cb) override;
+	Return<void> setEapPrivateKeyId(
+	    const hidl_string& id, setEapPrivateKeyId_cb _hidl_cb) override;
 	Return<void> setEapSubjectMatch(
 	    const hidl_string& match, setEapSubjectMatch_cb _hidl_cb) override;
 	Return<void> setEapAltSubjectMatch(
@@ -118,6 +120,12 @@ public:
 	Return<void> setEapDomainSuffixMatch(
 	    const hidl_string& match,
 	    setEapDomainSuffixMatch_cb _hidl_cb) override;
+	Return<void> setProactiveKeyCaching(
+	    bool enable, setProactiveKeyCaching_cb _hidl_cb) override;
+	Return<void> setIdStr(
+	    const hidl_string& id_str, setIdStr_cb _hidl_cb) override;
+	Return<void> setUpdateIdentifier(
+	    uint32_t id, setUpdateIdentifier_cb _hidl_cb) override;
 	Return<void> getSsid(getSsid_cb _hidl_cb) override;
 	Return<void> getBssid(getBssid_cb _hidl_cb) override;
 	Return<void> getScanSsid(getScanSsid_cb _hidl_cb) override;
@@ -127,6 +135,7 @@ public:
 	Return<void> getGroupCipher(getGroupCipher_cb _hidl_cb) override;
 	Return<void> getPairwiseCipher(getPairwiseCipher_cb _hidl_cb) override;
 	Return<void> getPskPassphrase(getPskPassphrase_cb _hidl_cb) override;
+	Return<void> getPsk(getPsk_cb _hidl_cb) override;
 	Return<void> getWepKey(
 	    uint32_t key_idx, getWepKey_cb _hidl_cb) override;
 	Return<void> getWepTxKeyIdx(getWepTxKeyIdx_cb _hidl_cb) override;
@@ -141,7 +150,8 @@ public:
 	Return<void> getEapCACert(getEapCACert_cb _hidl_cb) override;
 	Return<void> getEapCAPath(getEapCAPath_cb _hidl_cb) override;
 	Return<void> getEapClientCert(getEapClientCert_cb _hidl_cb) override;
-	Return<void> getEapPrivateKey(getEapPrivateKey_cb _hidl_cb) override;
+	Return<void> getEapPrivateKeyId(
+	    getEapPrivateKeyId_cb _hidl_cb) override;
 	Return<void> getEapSubjectMatch(
 	    getEapSubjectMatch_cb _hidl_cb) override;
 	Return<void> getEapAltSubjectMatch(
@@ -150,17 +160,28 @@ public:
 	Return<void> getEapEngineID(getEapEngineID_cb _hidl_cb) override;
 	Return<void> getEapDomainSuffixMatch(
 	    getEapDomainSuffixMatch_cb _hidl_cb) override;
+	Return<void> getIdStr(getIdStr_cb _hidl_cb) override;
+	Return<void> getWpsNfcConfigurationToken(
+	    getWpsNfcConfigurationToken_cb _hidl_cb) override;
 	Return<void> enable(bool no_connect, enable_cb _hidl_cb) override;
 	Return<void> disable(disable_cb _hidl_cb) override;
 	Return<void> select(select_cb _hidl_cb) override;
 	Return<void> sendNetworkEapSimGsmAuthResponse(
-	    const ISupplicantStaNetwork::NetworkResponseEapSimGsmAuthParams&
-		params,
+	    const hidl_vec<
+		ISupplicantStaNetwork::NetworkResponseEapSimGsmAuthParams>&
+		vec_params,
 	    sendNetworkEapSimGsmAuthResponse_cb _hidl_cb) override;
+	Return<void> sendNetworkEapSimGsmAuthFailure(
+	    sendNetworkEapSimGsmAuthFailure_cb _hidl_cb) override;
 	Return<void> sendNetworkEapSimUmtsAuthResponse(
 	    const ISupplicantStaNetwork::NetworkResponseEapSimUmtsAuthParams&
 		params,
 	    sendNetworkEapSimUmtsAuthResponse_cb _hidl_cb) override;
+	Return<void> sendNetworkEapSimUmtsAutsResponse(
+	    const hidl_array<uint8_t, 14>& auts,
+	    sendNetworkEapSimUmtsAutsResponse_cb _hidl_cb) override;
+	Return<void> sendNetworkEapSimUmtsAuthFailure(
+	    sendNetworkEapSimUmtsAuthFailure_cb _hidl_cb) override;
 	Return<void> sendNetworkEapIdentityResponse(
 	    const hidl_vec<uint8_t>& identity,
 	    sendNetworkEapIdentityResponse_cb _hidl_cb) override;
@@ -182,6 +203,7 @@ private:
 	SupplicantStatus setPairwiseCipherInternal(
 	    uint32_t pairwise_cipher_mask);
 	SupplicantStatus setPskPassphraseInternal(const std::string& psk);
+	SupplicantStatus setPskInternal(const std::array<uint8_t, 32>& psk);
 	SupplicantStatus setWepKeyInternal(
 	    uint32_t key_idx, const std::vector<uint8_t>& wep_key);
 	SupplicantStatus setWepTxKeyIdxInternal(uint32_t key_idx);
@@ -199,7 +221,7 @@ private:
 	SupplicantStatus setEapCACertInternal(const std::string& path);
 	SupplicantStatus setEapCAPathInternal(const std::string& path);
 	SupplicantStatus setEapClientCertInternal(const std::string& path);
-	SupplicantStatus setEapPrivateKeyInternal(const std::string& path);
+	SupplicantStatus setEapPrivateKeyIdInternal(const std::string& id);
 	SupplicantStatus setEapSubjectMatchInternal(const std::string& match);
 	SupplicantStatus setEapAltSubjectMatchInternal(
 	    const std::string& match);
@@ -207,6 +229,9 @@ private:
 	SupplicantStatus setEapEngineIDInternal(const std::string& id);
 	SupplicantStatus setEapDomainSuffixMatchInternal(
 	    const std::string& match);
+	SupplicantStatus setProactiveKeyCachingInternal(bool enable);
+	SupplicantStatus setIdStrInternal(const std::string& id_str);
+	SupplicantStatus setUpdateIdentifierInternal(uint32_t id);
 	std::pair<SupplicantStatus, std::vector<uint8_t>> getSsidInternal();
 	std::pair<SupplicantStatus, std::array<uint8_t, 6>> getBssidInternal();
 	std::pair<SupplicantStatus, bool> getScanSsidInternal();
@@ -216,6 +241,7 @@ private:
 	std::pair<SupplicantStatus, uint32_t> getGroupCipherInternal();
 	std::pair<SupplicantStatus, uint32_t> getPairwiseCipherInternal();
 	std::pair<SupplicantStatus, std::string> getPskPassphraseInternal();
+	std::pair<SupplicantStatus, std::array<uint8_t, 32>> getPskInternal();
 	std::pair<SupplicantStatus, std::vector<uint8_t>> getWepKeyInternal(
 	    uint32_t key_idx);
 	std::pair<SupplicantStatus, uint32_t> getWepTxKeyIdxInternal();
@@ -233,7 +259,7 @@ private:
 	std::pair<SupplicantStatus, std::string> getEapCACertInternal();
 	std::pair<SupplicantStatus, std::string> getEapCAPathInternal();
 	std::pair<SupplicantStatus, std::string> getEapClientCertInternal();
-	std::pair<SupplicantStatus, std::string> getEapPrivateKeyInternal();
+	std::pair<SupplicantStatus, std::string> getEapPrivateKeyIdInternal();
 	std::pair<SupplicantStatus, std::string> getEapSubjectMatchInternal();
 	std::pair<SupplicantStatus, std::string>
 	getEapAltSubjectMatchInternal();
@@ -241,15 +267,23 @@ private:
 	std::pair<SupplicantStatus, std::string> getEapEngineIDInternal();
 	std::pair<SupplicantStatus, std::string>
 	getEapDomainSuffixMatchInternal();
+	std::pair<SupplicantStatus, std::string> getIdStrInternal();
+	std::pair<SupplicantStatus, std::vector<uint8_t>>
+	getWpsNfcConfigurationTokenInternal();
 	SupplicantStatus enableInternal(bool no_connect);
 	SupplicantStatus disableInternal();
 	SupplicantStatus selectInternal();
 	SupplicantStatus sendNetworkEapSimGsmAuthResponseInternal(
-	    const ISupplicantStaNetwork::NetworkResponseEapSimGsmAuthParams&
-		params);
+	    const std::vector<
+		ISupplicantStaNetwork::NetworkResponseEapSimGsmAuthParams>&
+		vec_params);
+	SupplicantStatus sendNetworkEapSimGsmAuthFailureInternal();
 	SupplicantStatus sendNetworkEapSimUmtsAuthResponseInternal(
 	    const ISupplicantStaNetwork::NetworkResponseEapSimUmtsAuthParams&
 		params);
+	SupplicantStatus sendNetworkEapSimUmtsAutsResponseInternal(
+	    const std::array<uint8_t, 14>& auts);
+	SupplicantStatus sendNetworkEapSimUmtsAuthFailureInternal();
 	SupplicantStatus sendNetworkEapIdentityResponseInternal(
 	    const std::vector<uint8_t>& identity);
 

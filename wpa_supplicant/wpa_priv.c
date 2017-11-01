@@ -1081,12 +1081,6 @@ void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
 				    &data->pmkid_candidate,
 				    sizeof(struct pmkid_candidate));
 		break;
-	case EVENT_STKSTART:
-		if (data == NULL)
-			return;
-		wpa_priv_send_event(iface, PRIVSEP_EVENT_STKSTART,
-				    &data->stkstart.peer, ETH_ALEN);
-		break;
 	case EVENT_FT_RESPONSE:
 		wpa_priv_send_ft_response(iface, data);
 		break;
@@ -1190,7 +1184,7 @@ static void wpa_priv_fd_workaround(void)
 static void usage(void)
 {
 	printf("wpa_priv v" VERSION_STR "\n"
-	       "Copyright (c) 2007-2016, Jouni Malinen <j@w1.fi> and "
+	       "Copyright (c) 2007-2017, Jouni Malinen <j@w1.fi> and "
 	       "contributors\n"
 	       "\n"
 	       "usage:\n"

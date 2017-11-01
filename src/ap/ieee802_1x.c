@@ -973,7 +973,9 @@ void ieee802_1x_receive(struct hostapd_data *hapd, const u8 *sa, const u8 *buf,
 	}
 
 	key_mgmt = wpa_auth_sta_key_mgmt(sta->wpa_sm);
-	if (key_mgmt != -1 && wpa_key_mgmt_wpa_psk(key_mgmt)) {
+	if (key_mgmt != -1 &&
+	    (wpa_key_mgmt_wpa_psk(key_mgmt) || key_mgmt == WPA_KEY_MGMT_OWE ||
+	     key_mgmt == WPA_KEY_MGMT_DPP)) {
 		wpa_printf(MSG_DEBUG, "IEEE 802.1X: Ignore EAPOL message - "
 			   "STA is using PSK");
 		return;
@@ -1116,7 +1118,9 @@ void ieee802_1x_new_station(struct hostapd_data *hapd, struct sta_info *sta)
 	}
 
 	key_mgmt = wpa_auth_sta_key_mgmt(sta->wpa_sm);
-	if (key_mgmt != -1 && wpa_key_mgmt_wpa_psk(key_mgmt)) {
+	if (key_mgmt != -1 &&
+	    (wpa_key_mgmt_wpa_psk(key_mgmt) || key_mgmt == WPA_KEY_MGMT_OWE ||
+	     key_mgmt == WPA_KEY_MGMT_DPP)) {
 		wpa_printf(MSG_DEBUG, "IEEE 802.1X: Ignore STA - using PSK");
 		/*
 		 * Clear any possible EAPOL authenticator state to support
@@ -1420,11 +1424,10 @@ static void ieee802_1x_store_radius_class(struct hostapd_data *hapd,
 			}
 		} while (class_len < 1);
 
-		nclass[nclass_count].data = os_malloc(class_len);
+		nclass[nclass_count].data = os_memdup(attr_class, class_len);
 		if (nclass[nclass_count].data == NULL)
 			break;
 
-		os_memcpy(nclass[nclass_count].data, attr_class, class_len);
 		nclass[nclass_count].len = class_len;
 		nclass_count++;
 	}
@@ -1962,7 +1965,7 @@ static void ieee802_1x_rekey(void *eloop_ctx, void *timeout_ctx)
 
 	wpa_printf(MSG_DEBUG, "IEEE 802.1X: New default WEP key index %d",
 		   eapol->default_wep_key_idx);
-		      
+
 	if (ieee802_1x_rekey_broadcast(hapd)) {
 		hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE8021X,
 			       HOSTAPD_LEVEL_WARNING, "failed to generate a "
@@ -2072,11 +2075,10 @@ static int ieee802_1x_get_eap_user(void *ctx, const u8 *identity,
 	}
 
 	if (eap_user->password) {
-		user->password = os_malloc(eap_user->password_len);
+		user->password = os_memdup(eap_user->password,
+					   eap_user->password_len);
 		if (user->password == NULL)
 			goto out;
-		os_memcpy(user->password, eap_user->password,
-			  eap_user->password_len);
 		user->password_len = eap_user->password_len;
 		user->password_hash = eap_user->password_hash;
 	}
@@ -2228,6 +2230,7 @@ int ieee802_1x_init(struct hostapd_data *hapd)
 	conf.erp_domain = hapd->conf->erp_domain;
 	conf.erp = hapd->conf->eap_server_erp;
 	conf.tls_session_lifetime = hapd->conf->tls_session_lifetime;
+	conf.tls_flags = hapd->conf->tls_flags;
 	conf.pac_opaque_encr_key = hapd->conf->pac_opaque_encr_key;
 	conf.eap_fast_a_id = hapd->conf->eap_fast_a_id;
 	conf.eap_fast_a_id_len = hapd->conf->eap_fast_a_id_len;
@@ -2363,6 +2366,16 @@ int ieee802_1x_eapol_tx_status(struct hostapd_data *hapd, struct sta_info *sta,
 		   "type=%d length=%d - ack=%d",
 		   MAC2STR(sta->addr), xhdr->version, xhdr->type,
 		   be_to_host16(xhdr->length), ack);
+
+#ifdef CONFIG_WPS
+	if (xhdr->type == IEEE802_1X_TYPE_EAP_PACKET && ack &&
+	    (sta->flags & WLAN_STA_WPS) &&
+	    ap_sta_pending_delayed_1x_auth_fail_disconnect(hapd, sta)) {
+		wpa_printf(MSG_DEBUG,
+			   "WPS: Indicate EAP completion on ACK for EAP-Failure");
+		hostapd_wps_eap_completed(hapd);
+	}
+#endif /* CONFIG_WPS */
 
 	if (xhdr->type != IEEE802_1X_TYPE_EAPOL_KEY)
 		return 0;
@@ -2737,15 +2750,6 @@ static void ieee802_1x_finished(struct hostapd_data *hapd,
 		 * EAP-FAST with anonymous provisioning, may require another
 		 * EAPOL authentication to be started to complete connection.
 		 */
-		wpa_dbg(hapd->msg_ctx, MSG_DEBUG, "IEEE 802.1X: Force "
-			"disconnection after EAP-Failure");
-		/* Add a small sleep to increase likelihood of previously
-		 * requested EAP-Failure TX getting out before this should the
-		 * driver reorder operations.
-		 */
-		os_sleep(0, 10000);
-		ap_sta_disconnect(hapd, sta, sta->addr,
-				  WLAN_REASON_IEEE_802_1X_AUTH_FAILED);
-		hostapd_wps_eap_completed(hapd);
+		ap_sta_delayed_1x_auth_fail_disconnect(hapd, sta);
 	}
 }

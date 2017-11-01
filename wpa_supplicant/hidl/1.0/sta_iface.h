@@ -115,6 +115,46 @@ public:
 	Return<void> setCountryCode(
 	    const hidl_array<int8_t, 2>& code,
 	    setCountryCode_cb _hidl_cb) override;
+	Return<void> startWpsRegistrar(
+	    const hidl_array<uint8_t, 6>& bssid, const hidl_string& pin,
+	    startWpsRegistrar_cb _hidl_cb) override;
+	Return<void> startWpsPbc(
+	    const hidl_array<uint8_t, 6>& bssid,
+	    startWpsPbc_cb _hidl_cb) override;
+	Return<void> startWpsPinKeypad(
+	    const hidl_string& pin, startWpsPinKeypad_cb _hidl_cb) override;
+	Return<void> startWpsPinDisplay(
+	    const hidl_array<uint8_t, 6>& bssid,
+	    startWpsPinDisplay_cb _hidl_cb) override;
+	Return<void> cancelWps(cancelWps_cb _hidl_cb) override;
+	Return<void> setWpsDeviceName(
+	    const hidl_string& name, setWpsDeviceName_cb _hidl_cb) override;
+	Return<void> setWpsDeviceType(
+	    const hidl_array<uint8_t, 8>& type,
+	    setWpsDeviceType_cb _hidl_cb) override;
+	Return<void> setWpsManufacturer(
+	    const hidl_string& manufacturer,
+	    setWpsManufacturer_cb _hidl_cb) override;
+	Return<void> setWpsModelName(
+	    const hidl_string& model_name,
+	    setWpsModelName_cb _hidl_cb) override;
+	Return<void> setWpsModelNumber(
+	    const hidl_string& model_number,
+	    setWpsModelNumber_cb _hidl_cb) override;
+	Return<void> setWpsSerialNumber(
+	    const hidl_string& serial_number,
+	    setWpsSerialNumber_cb _hidl_cb) override;
+	Return<void> setWpsConfigMethods(
+	    uint16_t config_methods, setWpsConfigMethods_cb _hidl_cb) override;
+	Return<void> setExternalSim(
+	    bool useExternalSim, setExternalSim_cb _hidl_cb) override;
+	Return<void> addExtRadioWork(
+	    const hidl_string& name, uint32_t freq_in_mhz,
+	    uint32_t timeout_in_sec, addExtRadioWork_cb _hidl_cb) override;
+	Return<void> removeExtRadioWork(
+	    uint32_t id, removeExtRadioWork_cb _hidl_cb) override;
+	Return<void> enableAutoReconnect(
+	    bool enable, enableAutoReconnect_cb _hidl_cb) override;
 
 private:
 	// Corresponding worker functions for the HIDL methods.
@@ -161,6 +201,31 @@ private:
 	SupplicantStatus setSuspendModeEnabledInternal(bool enable);
 	SupplicantStatus setCountryCodeInternal(
 	    const std::array<int8_t, 2>& code);
+	SupplicantStatus startWpsRegistrarInternal(
+	    const std::array<uint8_t, 6>& bssid, const std::string& pin);
+	SupplicantStatus startWpsPbcInternal(
+	    const std::array<uint8_t, 6>& bssid);
+	SupplicantStatus startWpsPinKeypadInternal(const std::string& pin);
+	std::pair<SupplicantStatus, std::string> startWpsPinDisplayInternal(
+	    const std::array<uint8_t, 6>& bssid);
+	SupplicantStatus cancelWpsInternal();
+	SupplicantStatus setWpsDeviceNameInternal(const std::string& name);
+	SupplicantStatus setWpsDeviceTypeInternal(
+	    const std::array<uint8_t, 8>& type);
+	SupplicantStatus setWpsManufacturerInternal(
+	    const std::string& manufacturer);
+	SupplicantStatus setWpsModelNameInternal(const std::string& model_name);
+	SupplicantStatus setWpsModelNumberInternal(
+	    const std::string& model_number);
+	SupplicantStatus setWpsSerialNumberInternal(
+	    const std::string& serial_number);
+	SupplicantStatus setWpsConfigMethodsInternal(uint16_t config_methods);
+	SupplicantStatus setExternalSimInternal(bool useExternalSim);
+	std::pair<SupplicantStatus, uint32_t> addExtRadioWorkInternal(
+	    const std::string& name, uint32_t freq_in_mhz,
+	    uint32_t timeout_in_sec);
+	SupplicantStatus removeExtRadioWorkInternal(uint32_t id);
+	SupplicantStatus enableAutoReconnectInternal(bool enable);
 
 	struct wpa_supplicant* retrieveIfacePtr();
 

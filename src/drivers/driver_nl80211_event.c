@@ -1,6 +1,6 @@
 /*
  * Driver interaction with Linux nl80211/cfg80211 - Event processing
- * Copyright (c) 2002-2014, Jouni Malinen <j@w1.fi>
+ * Copyright (c) 2002-2017, Jouni Malinen <j@w1.fi>
  * Copyright (c) 2007, Johannes Berg <johannes@sipsolutions.net>
  * Copyright (c) 2009-2010, Atheros Communications
  *
@@ -279,11 +279,15 @@ static void mlme_event_connect(struct wpa_driver_nl80211_data *drv,
 			       struct nlattr *addr, struct nlattr *req_ie,
 			       struct nlattr *resp_ie,
 			       struct nlattr *timed_out,
+			       struct nlattr *timeout_reason,
 			       struct nlattr *authorized,
 			       struct nlattr *key_replay_ctr,
 			       struct nlattr *ptk_kck,
 			       struct nlattr *ptk_kek,
-			       struct nlattr *subnet_status)
+			       struct nlattr *subnet_status,
+			       struct nlattr *fils_erp_next_seq_num,
+			       struct nlattr *fils_pmk,
+			       struct nlattr *fils_pmkid)
 {
 	union wpa_event_data event;
 	const u8 *ssid = NULL;
@@ -338,6 +342,27 @@ static void mlme_event_connect(struct wpa_driver_nl80211_data *drv,
 		}
 		event.assoc_reject.status_code = status_code;
 		event.assoc_reject.timed_out = timed_out != NULL;
+		if (timed_out && timeout_reason) {
+			enum nl80211_timeout_reason reason;
+
+			reason = nla_get_u32(timeout_reason);
+			switch (reason) {
+			case NL80211_TIMEOUT_SCAN:
+				event.assoc_reject.timeout_reason = "scan";
+				break;
+			case NL80211_TIMEOUT_AUTH:
+				event.assoc_reject.timeout_reason = "auth";
+				break;
+			case NL80211_TIMEOUT_ASSOC:
+				event.assoc_reject.timeout_reason = "assoc";
+				break;
+			default:
+				break;
+			}
+		}
+		if (fils_erp_next_seq_num)
+			event.assoc_reject.fils_erp_next_seq_num =
+				nla_get_u16(fils_erp_next_seq_num);
 		wpa_supplicant_event(drv->ctx, EVENT_ASSOC_REJECT, &event);
 		return;
 	}
@@ -410,6 +435,18 @@ static void mlme_event_connect(struct wpa_driver_nl80211_data *drv,
 		 */
 		event.assoc_info.subnet_status = nla_get_u8(subnet_status);
 	}
+
+	if (fils_erp_next_seq_num)
+		event.assoc_info.fils_erp_next_seq_num =
+			nla_get_u16(fils_erp_next_seq_num);
+
+	if (fils_pmk) {
+		event.assoc_info.fils_pmk = nla_data(fils_pmk);
+		event.assoc_info.fils_pmk_len = nla_len(fils_pmk);
+	}
+
+	if (fils_pmkid)
+		event.assoc_info.fils_pmkid = nla_data(fils_pmkid);
 
 	wpa_supplicant_event(drv->ctx, EVENT_ASSOC, &event);
 }
@@ -860,6 +897,8 @@ static void mlme_event(struct i802_bss *bss,
 		   MAC2STR(data + 4 + ETH_ALEN));
 	if (cmd != NL80211_CMD_FRAME_TX_STATUS && !(data[4] & 0x01) &&
 	    os_memcmp(bss->addr, data + 4, ETH_ALEN) != 0 &&
+	    (is_zero_ether_addr(bss->rand_addr) ||
+	     os_memcmp(bss->rand_addr, data + 4, ETH_ALEN) != 0) &&
 	    os_memcmp(bss->addr, data + 4 + ETH_ALEN, ETH_ALEN) != 0) {
 		wpa_printf(MSG_MSGDUMP, "nl80211: %s: Ignore MLME frame event "
 			   "for foreign address", bss->ifname);
@@ -1110,6 +1149,16 @@ static void send_scan_event(struct wpa_driver_nl80211_data *drv, int aborted,
 		wpa_printf(MSG_DEBUG, "nl80211: Scan included frequencies:%s",
 			   msg);
 	}
+
+	if (tb[NL80211_ATTR_SCAN_START_TIME_TSF] &&
+	    tb[NL80211_ATTR_SCAN_START_TIME_TSF_BSSID]) {
+		info->scan_start_tsf =
+			nla_get_u64(tb[NL80211_ATTR_SCAN_START_TIME_TSF]);
+		os_memcpy(info->scan_start_tsf_bssid,
+			  nla_data(tb[NL80211_ATTR_SCAN_START_TIME_TSF_BSSID]),
+			  ETH_ALEN);
+	}
+
 	wpa_supplicant_event(drv->ctx, EVENT_SCAN_RESULTS, &event);
 }
 
@@ -1122,6 +1171,10 @@ static void nl80211_cqm_event(struct wpa_driver_nl80211_data *drv,
 		[NL80211_ATTR_CQM_RSSI_HYST] = { .type = NLA_U8 },
 		[NL80211_ATTR_CQM_RSSI_THRESHOLD_EVENT] = { .type = NLA_U32 },
 		[NL80211_ATTR_CQM_PKT_LOSS_EVENT] = { .type = NLA_U32 },
+		[NL80211_ATTR_CQM_TXE_RATE] = { .type = NLA_U32 },
+		[NL80211_ATTR_CQM_TXE_PKTS] = { .type = NLA_U32 },
+		[NL80211_ATTR_CQM_TXE_INTVL] = { .type = NLA_U32 },
+		[NL80211_ATTR_CQM_BEACON_LOSS_EVENT] = { .type = NLA_FLAG },
 	};
 	struct nlattr *cqm[NL80211_ATTR_CQM_MAX + 1];
 	enum nl80211_cqm_rssi_threshold_event event;
@@ -1143,12 +1196,39 @@ static void nl80211_cqm_event(struct wpa_driver_nl80211_data *drv,
 			return;
 		os_memcpy(ed.low_ack.addr, nla_data(tb[NL80211_ATTR_MAC]),
 			  ETH_ALEN);
+		ed.low_ack.num_packets =
+			nla_get_u32(cqm[NL80211_ATTR_CQM_PKT_LOSS_EVENT]);
+		wpa_printf(MSG_DEBUG, "nl80211: Packet loss event for " MACSTR
+			   " (num_packets %u)",
+			   MAC2STR(ed.low_ack.addr), ed.low_ack.num_packets);
 		wpa_supplicant_event(drv->ctx, EVENT_STATION_LOW_ACK, &ed);
 		return;
 	}
 
-	if (cqm[NL80211_ATTR_CQM_RSSI_THRESHOLD_EVENT] == NULL)
+	if (cqm[NL80211_ATTR_CQM_BEACON_LOSS_EVENT]) {
+		wpa_printf(MSG_DEBUG, "nl80211: Beacon loss event");
+		wpa_supplicant_event(drv->ctx, EVENT_BEACON_LOSS, NULL);
 		return;
+	}
+
+	if (cqm[NL80211_ATTR_CQM_TXE_RATE] &&
+	    cqm[NL80211_ATTR_CQM_TXE_PKTS] &&
+	    cqm[NL80211_ATTR_CQM_TXE_INTVL] &&
+	    cqm[NL80211_ATTR_MAC]) {
+		wpa_printf(MSG_DEBUG, "nl80211: CQM TXE event for " MACSTR
+			   " (rate: %u pkts: %u interval: %u)",
+			   MAC2STR((u8 *) nla_data(cqm[NL80211_ATTR_MAC])),
+			   nla_get_u32(cqm[NL80211_ATTR_CQM_TXE_RATE]),
+			   nla_get_u32(cqm[NL80211_ATTR_CQM_TXE_PKTS]),
+			   nla_get_u32(cqm[NL80211_ATTR_CQM_TXE_INTVL]));
+		return;
+	}
+
+	if (cqm[NL80211_ATTR_CQM_RSSI_THRESHOLD_EVENT] == NULL) {
+		wpa_printf(MSG_DEBUG,
+			   "nl80211: Not a CQM RSSI threshold event");
+		return;
+	}
 	event = nla_get_u32(cqm[NL80211_ATTR_CQM_RSSI_THRESHOLD_EVENT]);
 
 	if (event == NL80211_CQM_RSSI_THRESHOLD_EVENT_HIGH) {
@@ -1159,8 +1239,12 @@ static void nl80211_cqm_event(struct wpa_driver_nl80211_data *drv,
 		wpa_printf(MSG_DEBUG, "nl80211: Connection quality monitor "
 			   "event: RSSI low");
 		ed.signal_change.above_threshold = 0;
-	} else
+	} else {
+		wpa_printf(MSG_DEBUG,
+			   "nl80211: Unknown CQM RSSI threshold event: %d",
+			   event);
 		return;
+	}
 
 	res = nl80211_get_link_signal(drv, &sig);
 	if (res == 0) {
@@ -1502,6 +1586,10 @@ static void nl80211_radar_event(struct wpa_driver_nl80211_data *drv,
 	case NL80211_RADAR_NOP_FINISHED:
 		wpa_supplicant_event(drv->ctx, EVENT_DFS_NOP_FINISHED, &data);
 		break;
+	case NL80211_RADAR_PRE_CAC_EXPIRED:
+		wpa_supplicant_event(drv->ctx, EVENT_DFS_PRE_CAC_EXPIRED,
+				     &data);
+		break;
 	default:
 		wpa_printf(MSG_DEBUG, "nl80211: Unknown radar event %d "
 			   "received", event_type);
@@ -1679,12 +1767,15 @@ static void qca_nl80211_key_mgmt_auth(struct wpa_driver_nl80211_data *drv,
 			   tb[QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_BSSID],
 			   tb[QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_REQ_IE],
 			   tb[QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_RESP_IE],
-			   NULL,
+			   NULL, NULL,
 			   tb[QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_AUTHORIZED],
 			   tb[QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_KEY_REPLAY_CTR],
 			   tb[QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_PTK_KCK],
 			   tb[QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_PTK_KEK],
-			   tb[QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_SUBNET_STATUS]);
+			   tb[QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_SUBNET_STATUS],
+			   tb[QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_FILS_ERP_NEXT_SEQ_NUM],
+			   tb[QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_PMK],
+			   tb[QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_PMKID]);
 }
 
 
@@ -2199,7 +2290,13 @@ static void do_process_drv_event(struct i802_bss *bss, int cmd,
 				   tb[NL80211_ATTR_REQ_IE],
 				   tb[NL80211_ATTR_RESP_IE],
 				   tb[NL80211_ATTR_TIMED_OUT],
-				   NULL, NULL, NULL, NULL, NULL);
+				   tb[NL80211_ATTR_TIMEOUT_REASON],
+				   NULL, NULL, NULL,
+				   tb[NL80211_ATTR_FILS_KEK],
+				   NULL,
+				   tb[NL80211_ATTR_FILS_ERP_NEXT_SEQ_NUM],
+				   tb[NL80211_ATTR_PMK],
+				   tb[NL80211_ATTR_PMKID]);
 		break;
 	case NL80211_CMD_CH_SWITCH_NOTIFY:
 		mlme_event_ch_switch(drv,

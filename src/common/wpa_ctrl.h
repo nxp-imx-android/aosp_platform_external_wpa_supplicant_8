@@ -1,6 +1,6 @@
 /*
  * wpa_supplicant/hostapd control interface library
- * Copyright (c) 2004-2006, Jouni Malinen <j@w1.fi>
+ * Copyright (c) 2004-2017, Jouni Malinen <j@w1.fi>
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -74,6 +74,8 @@ extern "C" {
 #define WPA_EVENT_NETWORK_NOT_FOUND "CTRL-EVENT-NETWORK-NOT-FOUND "
 /** Change in the signal level was reported by the driver */
 #define WPA_EVENT_SIGNAL_CHANGE "CTRL-EVENT-SIGNAL-CHANGE "
+/** Beacon loss reported by the driver */
+#define WPA_EVENT_BEACON_LOSS "CTRL-EVENT-BEACON-LOSS "
 /** Regulatory domain channel */
 #define WPA_EVENT_REGDOM_CHANGE "CTRL-EVENT-REGDOM-CHANGE "
 /** Channel switch (followed by freq=<MHz> and other channel parameters) */
@@ -140,6 +142,23 @@ extern "C" {
 #define WPS_EVENT_ER_ENROLLEE_REMOVE "WPS-ER-ENROLLEE-REMOVE "
 #define WPS_EVENT_ER_AP_SETTINGS "WPS-ER-AP-SETTINGS "
 #define WPS_EVENT_ER_SET_SEL_REG "WPS-ER-AP-SET-SEL-REG "
+
+/* DPP events */
+#define DPP_EVENT_AUTH_SUCCESS "DPP-AUTH-SUCCESS "
+#define DPP_EVENT_NOT_COMPATIBLE "DPP-NOT-COMPATIBLE "
+#define DPP_EVENT_RESPONSE_PENDING "DPP-RESPONSE-PENDING "
+#define DPP_EVENT_SCAN_PEER_QR_CODE "DPP-SCAN-PEER-QR-CODE "
+#define DPP_EVENT_CONF_RECEIVED "DPP-CONF-RECEIVED "
+#define DPP_EVENT_CONF_SENT "DPP-CONF-SENT "
+#define DPP_EVENT_CONF_FAILED "DPP-CONF-FAILED "
+#define DPP_EVENT_CONFOBJ_SSID "DPP-CONFOBJ-SSID "
+#define DPP_EVENT_CONFOBJ_PASS "DPP-CONFOBJ-PASS "
+#define DPP_EVENT_CONFOBJ_PSK "DPP-CONFOBJ-PSK "
+#define DPP_EVENT_CONNECTOR "DPP-CONNECTOR "
+#define DPP_EVENT_C_SIGN_KEY "DPP-C-SIGN-KEY "
+#define DPP_EVENT_NET_ACCESS_KEY "DPP-NET-ACCESS-KEY "
+#define DPP_EVENT_MISSING_CONNECTOR "DPP-MISSING-CONNECTOR "
+#define DPP_EVENT_NETWORK_ID "DPP-NETWORK-ID "
 
 /* MESH events */
 #define MESH_GROUP_STARTED "MESH-GROUP-STARTED "
@@ -232,6 +251,7 @@ extern "C" {
 #define RX_HS20_ANQP "RX-HS20-ANQP "
 #define RX_HS20_ANQP_ICON "RX-HS20-ANQP-ICON "
 #define RX_HS20_ICON "RX-HS20-ICON "
+#define RX_MBO_ANQP "RX-MBO-ANQP "
 
 #define HS20_SUBSCRIPTION_REMEDIATION "HS20-SUBSCRIPTION-REMEDIATION "
 #define HS20_DEAUTH_IMMINENT_NOTICE "HS20-DEAUTH-IMMINENT-NOTICE "
@@ -273,6 +293,7 @@ extern "C" {
 #define DFS_EVENT_CAC_START "DFS-CAC-START "
 #define DFS_EVENT_CAC_COMPLETED "DFS-CAC-COMPLETED "
 #define DFS_EVENT_NOP_FINISHED "DFS-NOP-FINISHED "
+#define DFS_EVENT_PRE_CAC_EXPIRED "DFS-PRE-CAC-EXPIRED "
 
 #define AP_CSA_FINISHED "AP-CSA-FINISHED "
 
@@ -287,6 +308,20 @@ extern "C" {
 
 /* BSS Transition Management Request received with MBO transition reason */
 #define MBO_TRANSITION_REASON "MBO-TRANSITION-REASON "
+
+/* parameters: <STA address> <dialog token> <ack=0/1> */
+#define BEACON_REQ_TX_STATUS "BEACON-REQ-TX-STATUS "
+/* parameters: <STA address> <dialog token> <report mode> <beacon report> */
+#define BEACON_RESP_RX "BEACON-RESP-RX "
+
+/* PMKSA cache entry added; parameters: <BSSID> <network_id> */
+#define PMKSA_CACHE_ADDED "PMKSA-CACHE-ADDED "
+/* PMKSA cache entry removed; parameters: <BSSID> <network_id> */
+#define PMKSA_CACHE_REMOVED "PMKSA-CACHE-REMOVED "
+
+/* FILS HLP Container receive; parameters: dst=<addr> src=<addr> frame=<hexdump>
+ */
+#define FILS_HLP_RX "FILS-HLP-RX "
 
 /* BSS command information masks */
 
@@ -313,6 +348,9 @@ extern "C" {
 #define WPA_BSS_MASK_SNR		BIT(19)
 #define WPA_BSS_MASK_EST_THROUGHPUT	BIT(20)
 #define WPA_BSS_MASK_FST		BIT(21)
+#define WPA_BSS_MASK_UPDATE_IDX		BIT(22)
+#define WPA_BSS_MASK_BEACON_IE		BIT(23)
+#define WPA_BSS_MASK_FILS_INDICATION	BIT(24)
 
 
 /* VENDOR_ELEM_* frame id values */

@@ -78,6 +78,7 @@ struct i802_bss {
 
 	struct nl80211_wiphy_data *wiphy_data;
 	struct dl_list wiphy_list;
+	u8 rand_addr[ETH_ALEN];
 };
 
 struct wpa_driver_nl80211_data {
@@ -160,6 +161,9 @@ struct wpa_driver_nl80211_data {
 	unsigned int scan_vendor_cmd_avail:1;
 	unsigned int connect_reassoc:1;
 	unsigned int set_wifi_conf_vendor_cmd_avail:1;
+	unsigned int he_capab_vendor_cmd_avail:1;
+	unsigned int fetch_bss_trans_status:1;
+	unsigned int roam_vendor_cmd_avail:1;
 
 	u64 vendor_scan_cookie;
 	u64 remain_on_chan_cookie;
@@ -208,6 +212,8 @@ struct wpa_driver_nl80211_data {
 	 * (NL80211_CMD_VENDOR). 0 if no pending scan request.
 	 */
 	int last_scan_cmd;
+
+	struct he_capabilities he_capab;
 };
 
 struct nl_msg;
@@ -255,7 +261,8 @@ int nl80211_send_monitor(struct wpa_driver_nl80211_data *drv,
 
 int wpa_driver_nl80211_capa(struct wpa_driver_nl80211_data *drv);
 struct hostapd_hw_modes *
-nl80211_get_hw_feature_data(void *priv, u16 *num_modes, u16 *flags);
+nl80211_get_hw_feature_data(void *priv, u16 *num_modes, u16 *flags,
+			    u8 *dfs_domain);
 
 int process_global_event(struct nl_msg *msg, void *arg);
 int process_bss_event(struct nl_msg *msg, void *arg);

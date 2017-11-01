@@ -9,15 +9,24 @@
 
 #include "hidl_manager.h"
 #include "hidl_return_util.h"
+#include "iface_config_utils.h"
+#include "misc_utils.h"
 #include "sta_iface.h"
 
 extern "C" {
+#include "utils/eloop.h"
 #include "gas_query.h"
 #include "interworking.h"
 #include "hs20_supplicant.h"
+#include "wps_supplicant.h"
 }
 
 namespace {
+using android::hardware::wifi::supplicant::V1_0::ISupplicantStaIface;
+using android::hardware::wifi::supplicant::V1_0::SupplicantStatus;
+using android::hardware::wifi::supplicant::V1_0::SupplicantStatusCode;
+using android::hardware::wifi::supplicant::V1_0::implementation::HidlManager;
+
 constexpr uint32_t kMaxAnqpElems = 100;
 constexpr char kGetMacAddress[] = "MACADDR";
 constexpr char kStartRxFilter[] = "RXFILTER-START";
@@ -29,11 +38,10 @@ constexpr char kSetBtCoexistenceScanStart[] = "BTCOEXSCAN-START";
 constexpr char kSetBtCoexistenceScanStop[] = "BTCOEXSCAN-STOP";
 constexpr char kSetSupendModeEnabled[] = "SETSUSPENDMODE 1";
 constexpr char kSetSupendModeDisabled[] = "SETSUSPENDMODE 0";
-constexpr char kSetCountryCode[] = "COUNTRY ";
-
-using android::hardware::wifi::supplicant::V1_0::ISupplicantStaIface;
-using android::hardware::wifi::supplicant::V1_0::SupplicantStatus;
-using android::hardware::wifi::supplicant::V1_0::SupplicantStatusCode;
+constexpr char kSetCountryCode[] = "COUNTRY";
+constexpr uint32_t kExtRadioWorkDefaultTimeoutInSec = static_cast<uint32_t>(
+    ISupplicantStaIface::ExtRadioWorkDefaults::TIMEOUT_IN_SECS);
+constexpr char kExtRadioWorkNamePrefix[] = "ext:";
 
 uint8_t convertHidlRxFilterTypeToInternal(
     ISupplicantStaIface::RxFilterType type)
@@ -87,6 +95,60 @@ SupplicantStatus doOneArgDriverCommand(
 	std::string cmd_str = std::string(cmd) + " " + arg;
 	return doZeroArgDriverCommand(wpa_s, cmd_str.c_str());
 }
+
+void endExtRadioWork(struct wpa_radio_work *work)
+{
+	auto *ework = static_cast<struct wpa_external_work *>(work->ctx);
+	work->wpa_s->ext_work_in_progress = 0;
+	radio_work_done(work);
+	os_free(ework);
+}
+
+void extRadioWorkTimeoutCb(void *eloop_ctx, void *timeout_ctx)
+{
+	auto *work = static_cast<struct wpa_radio_work *>(eloop_ctx);
+	auto *ework = static_cast<struct wpa_external_work *>(work->ctx);
+	wpa_dbg(
+	    work->wpa_s, MSG_DEBUG, "Timing out external radio work %u (%s)",
+	    ework->id, work->type);
+
+	HidlManager *hidl_manager = HidlManager::getInstance();
+	WPA_ASSERT(hidl_manager);
+	hidl_manager->notifyExtRadioWorkTimeout(work->wpa_s, ework->id);
+
+	endExtRadioWork(work);
+}
+
+void startExtRadioWork(struct wpa_radio_work *work)
+{
+	auto *ework = static_cast<struct wpa_external_work *>(work->ctx);
+	work->wpa_s->ext_work_in_progress = 1;
+	if (!ework->timeout) {
+		ework->timeout = kExtRadioWorkDefaultTimeoutInSec;
+	}
+	eloop_register_timeout(
+	    ework->timeout, 0, extRadioWorkTimeoutCb, work, nullptr);
+}
+
+void extRadioWorkStartCb(struct wpa_radio_work *work, int deinit)
+{
+	// deinit==1 is invoked during interface removal. Since the HIDL
+	// interface does not support interface addition/removal, we don't
+	// need to handle this scenario.
+	WPA_ASSERT(!deinit);
+
+	auto *ework = static_cast<struct wpa_external_work *>(work->ctx);
+	wpa_dbg(
+	    work->wpa_s, MSG_DEBUG, "Starting external radio work %u (%s)",
+	    ework->id, ework->type);
+
+	HidlManager *hidl_manager = HidlManager::getInstance();
+	WPA_ASSERT(hidl_manager);
+	hidl_manager->notifyExtRadioWorkStart(work->wpa_s, ework->id);
+
+	startExtRadioWork(work);
+}
+
 }  // namespace
 
 namespace android {
@@ -305,6 +367,136 @@ Return<void> StaIface::setCountryCode(
 	    &StaIface::setCountryCodeInternal, _hidl_cb, code);
 }
 
+Return<void> StaIface::startWpsRegistrar(
+    const hidl_array<uint8_t, 6> &bssid, const hidl_string &pin,
+    startWpsRegistrar_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::startWpsRegistrarInternal, _hidl_cb, bssid, pin);
+}
+
+Return<void> StaIface::startWpsPbc(
+    const hidl_array<uint8_t, 6> &bssid, startWpsPbc_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::startWpsPbcInternal, _hidl_cb, bssid);
+}
+
+Return<void> StaIface::startWpsPinKeypad(
+    const hidl_string &pin, startWpsPinKeypad_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::startWpsPinKeypadInternal, _hidl_cb, pin);
+}
+
+Return<void> StaIface::startWpsPinDisplay(
+    const hidl_array<uint8_t, 6> &bssid, startWpsPinDisplay_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::startWpsPinDisplayInternal, _hidl_cb, bssid);
+}
+
+Return<void> StaIface::cancelWps(cancelWps_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::cancelWpsInternal, _hidl_cb);
+}
+
+Return<void> StaIface::setWpsDeviceName(
+    const hidl_string &name, setWpsDeviceName_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::setWpsDeviceNameInternal, _hidl_cb, name);
+}
+
+Return<void> StaIface::setWpsDeviceType(
+    const hidl_array<uint8_t, 8> &type, setWpsDeviceType_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::setWpsDeviceTypeInternal, _hidl_cb, type);
+}
+
+Return<void> StaIface::setWpsManufacturer(
+    const hidl_string &manufacturer, setWpsManufacturer_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::setWpsManufacturerInternal, _hidl_cb, manufacturer);
+}
+
+Return<void> StaIface::setWpsModelName(
+    const hidl_string &model_name, setWpsModelName_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::setWpsModelNameInternal, _hidl_cb, model_name);
+}
+
+Return<void> StaIface::setWpsModelNumber(
+    const hidl_string &model_number, setWpsModelNumber_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::setWpsModelNumberInternal, _hidl_cb, model_number);
+}
+
+Return<void> StaIface::setWpsSerialNumber(
+    const hidl_string &serial_number, setWpsSerialNumber_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::setWpsSerialNumberInternal, _hidl_cb, serial_number);
+}
+
+Return<void> StaIface::setWpsConfigMethods(
+    uint16_t config_methods, setWpsConfigMethods_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::setWpsConfigMethodsInternal, _hidl_cb, config_methods);
+}
+
+Return<void> StaIface::setExternalSim(
+    bool useExternalSim, setExternalSim_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::setExternalSimInternal, _hidl_cb, useExternalSim);
+}
+
+Return<void> StaIface::addExtRadioWork(
+    const hidl_string &name, uint32_t freq_in_mhz, uint32_t timeout_in_sec,
+    addExtRadioWork_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::addExtRadioWorkInternal, _hidl_cb, name, freq_in_mhz,
+	    timeout_in_sec);
+}
+
+Return<void> StaIface::removeExtRadioWork(
+    uint32_t id, removeExtRadioWork_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::removeExtRadioWorkInternal, _hidl_cb, id);
+}
+
+Return<void> StaIface::enableAutoReconnect(
+    bool enable, enableAutoReconnect_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &StaIface::enableAutoReconnectInternal, _hidl_cb, enable);
+}
+
 std::pair<SupplicantStatus, std::string> StaIface::getNameInternal()
 {
 	return {{SupplicantStatusCode::SUCCESS, ""}, ifname_};
@@ -446,7 +638,7 @@ SupplicantStatus StaIface::initiateTdlsDiscoverInternal(
 		ret = wpa_drv_tdls_oper(wpa_s, TDLS_DISCOVERY_REQ, peer);
 	}
 	if (ret) {
-		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+		wpa_printf(MSG_INFO, "StaIface: TDLS discover failed: %d", ret);
 	}
 	return {SupplicantStatusCode::SUCCESS, ""};
 }
@@ -465,7 +657,7 @@ SupplicantStatus StaIface::initiateTdlsSetupInternal(
 		ret = wpa_drv_tdls_oper(wpa_s, TDLS_SETUP, peer);
 	}
 	if (ret) {
-		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+		wpa_printf(MSG_INFO, "StaIface: TDLS setup failed: %d", ret);
 	}
 	return {SupplicantStatusCode::SUCCESS, ""};
 }
@@ -484,7 +676,7 @@ SupplicantStatus StaIface::initiateTdlsTeardownInternal(
 		ret = wpa_drv_tdls_oper(wpa_s, TDLS_TEARDOWN, peer);
 	}
 	if (ret) {
-		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+		wpa_printf(MSG_INFO, "StaIface: TDLS teardown failed: %d", ret);
 	}
 	return {SupplicantStatusCode::SUCCESS, ""};
 }
@@ -545,7 +737,7 @@ StaIface::getMacAddressInternal()
 	    sizeof(driver_cmd_reply_buf));
 	// Reply is of the format: "Macaddr = XX:XX:XX:XX:XX:XX"
 	std::string reply_str = driver_cmd_reply_buf;
-	if (ret || reply_str.empty() ||
+	if (ret < 0 || reply_str.empty() ||
 	    reply_str.find("=") == std::string::npos) {
 		return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, {}};
 	}
@@ -636,6 +828,177 @@ SupplicantStatus StaIface::setCountryCodeInternal(
 		country[2] = 0x04;
 		p2p_set_country(p2p, country);
 	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+SupplicantStatus StaIface::startWpsRegistrarInternal(
+    const std::array<uint8_t, 6> &bssid, const std::string &pin)
+{
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	if (wpas_wps_start_reg(wpa_s, bssid.data(), pin.c_str(), nullptr)) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+SupplicantStatus StaIface::startWpsPbcInternal(
+    const std::array<uint8_t, 6> &bssid)
+{
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	const uint8_t *bssid_addr =
+	    is_zero_ether_addr(bssid.data()) ? nullptr : bssid.data();
+	if (wpas_wps_start_pbc(wpa_s, bssid_addr, 0)) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+SupplicantStatus StaIface::startWpsPinKeypadInternal(const std::string &pin)
+{
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	if (wpas_wps_start_pin(
+		wpa_s, nullptr, pin.c_str(), 0, DEV_PW_DEFAULT)) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+std::pair<SupplicantStatus, std::string> StaIface::startWpsPinDisplayInternal(
+    const std::array<uint8_t, 6> &bssid)
+{
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	const uint8_t *bssid_addr =
+	    is_zero_ether_addr(bssid.data()) ? nullptr : bssid.data();
+	int pin =
+	    wpas_wps_start_pin(wpa_s, bssid_addr, nullptr, 0, DEV_PW_DEFAULT);
+	if (pin < 0) {
+		return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+	}
+	return {{SupplicantStatusCode::SUCCESS, ""},
+		misc_utils::convertWpsPinToString(pin)};
+}
+
+SupplicantStatus StaIface::cancelWpsInternal()
+{
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	if (wpas_wps_cancel(wpa_s)) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+SupplicantStatus StaIface::setWpsDeviceNameInternal(const std::string &name)
+{
+	return iface_config_utils::setWpsDeviceName(retrieveIfacePtr(), name);
+}
+
+SupplicantStatus StaIface::setWpsDeviceTypeInternal(
+    const std::array<uint8_t, 8> &type)
+{
+	return iface_config_utils::setWpsDeviceType(retrieveIfacePtr(), type);
+}
+
+SupplicantStatus StaIface::setWpsManufacturerInternal(
+    const std::string &manufacturer)
+{
+	return iface_config_utils::setWpsManufacturer(
+	    retrieveIfacePtr(), manufacturer);
+}
+
+SupplicantStatus StaIface::setWpsModelNameInternal(
+    const std::string &model_name)
+{
+	return iface_config_utils::setWpsModelName(
+	    retrieveIfacePtr(), model_name);
+}
+
+SupplicantStatus StaIface::setWpsModelNumberInternal(
+    const std::string &model_number)
+{
+	return iface_config_utils::setWpsModelNumber(
+	    retrieveIfacePtr(), model_number);
+}
+
+SupplicantStatus StaIface::setWpsSerialNumberInternal(
+    const std::string &serial_number)
+{
+	return iface_config_utils::setWpsSerialNumber(
+	    retrieveIfacePtr(), serial_number);
+}
+
+SupplicantStatus StaIface::setWpsConfigMethodsInternal(uint16_t config_methods)
+{
+	return iface_config_utils::setWpsConfigMethods(
+	    retrieveIfacePtr(), config_methods);
+}
+
+SupplicantStatus StaIface::setExternalSimInternal(bool useExternalSim)
+{
+	return iface_config_utils::setExternalSim(
+	    retrieveIfacePtr(), useExternalSim);
+}
+
+std::pair<SupplicantStatus, uint32_t> StaIface::addExtRadioWorkInternal(
+    const std::string &name, uint32_t freq_in_mhz, uint32_t timeout_in_sec)
+{
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	auto *ework = static_cast<struct wpa_external_work *>(
+	    os_zalloc(sizeof(struct wpa_external_work)));
+	if (!ework) {
+		return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""},
+			UINT32_MAX};
+	}
+
+	std::string radio_work_name = kExtRadioWorkNamePrefix + name;
+	os_strlcpy(ework->type, radio_work_name.c_str(), sizeof(ework->type));
+	ework->timeout = timeout_in_sec;
+	wpa_s->ext_work_id++;
+	if (wpa_s->ext_work_id == 0) {
+		wpa_s->ext_work_id++;
+	}
+	ework->id = wpa_s->ext_work_id;
+
+	if (radio_add_work(
+		wpa_s, freq_in_mhz, ework->type, 0, extRadioWorkStartCb,
+		ework)) {
+		os_free(ework);
+		return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""},
+			UINT32_MAX};
+	}
+	return {SupplicantStatus{SupplicantStatusCode::SUCCESS, ""}, ework->id};
+}
+
+SupplicantStatus StaIface::removeExtRadioWorkInternal(uint32_t id)
+{
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	struct wpa_radio_work *work;
+	dl_list_for_each(work, &wpa_s->radio->work, struct wpa_radio_work, list)
+	{
+		if (os_strncmp(
+			work->type, kExtRadioWorkNamePrefix,
+			sizeof(kExtRadioWorkNamePrefix)) != 0)
+			continue;
+
+		auto *ework =
+		    static_cast<struct wpa_external_work *>(work->ctx);
+		if (ework->id != id)
+			continue;
+
+		wpa_dbg(
+		    wpa_s, MSG_DEBUG, "Completed external radio work %u (%s)",
+		    ework->id, ework->type);
+		eloop_cancel_timeout(extRadioWorkTimeoutCb, work, NULL);
+		endExtRadioWork(work);
+
+		return {SupplicantStatusCode::SUCCESS, ""};
+	}
+	return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+}
+
+SupplicantStatus StaIface::enableAutoReconnectInternal(bool enable)
+{
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	wpa_s->auto_reconnect_disabled = enable ? 0 : 1;
 	return {SupplicantStatusCode::SUCCESS, ""};
 }
 
