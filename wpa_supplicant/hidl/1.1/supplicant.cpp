@@ -14,6 +14,7 @@
 #include <android-base/file.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <cutils/properties.h>
 
 namespace {
 // Pre-populated interface params for interfaces controlled by wpa_supplicant.
@@ -299,9 +300,23 @@ Supplicant::addInterfaceInternal(const IfaceInfo& iface_info)
 				{}};
 		}
 		iface_params.confname = kStaIfaceConfPath;
-		int ret = access(kStaIfaceConfOverlayPath, R_OK);
-		if (ret == 0) {
-			iface_params.confanother = kStaIfaceConfOverlayPath;
+
+		char UNITE_VENDOR_NAME[PROPERTY_VALUE_MAX] = {'\0'};
+		property_get("ro.boot.wifivendor", UNITE_VENDOR_NAME, NULL);
+		if (strcmp(UNITE_VENDOR_NAME, "NULL") != 0) {
+			char kUniteStaIfaceConfOverlayPath[PROPERTY_VALUE_MAX];
+			strcpy(kUniteStaIfaceConfOverlayPath,"/vendor/etc/wifi/");
+			strcat(kUniteStaIfaceConfOverlayPath,UNITE_VENDOR_NAME);
+			strcat(kUniteStaIfaceConfOverlayPath,"_supplicant_overlay.conf");
+			int ret = access(kUniteStaIfaceConfOverlayPath, R_OK);
+			if (ret == 0) {
+				iface_params.confanother = kUniteStaIfaceConfOverlayPath;
+			}
+		} else {
+			int ret = access(kStaIfaceConfOverlayPath, R_OK);
+			if (ret == 0) {
+				iface_params.confanother = kStaIfaceConfOverlayPath;
+			}
 		}
 	}
 	iface_params.ifname = iface_info.name.c_str();

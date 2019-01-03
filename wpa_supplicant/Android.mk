@@ -1731,6 +1731,97 @@ endif
 include $(BUILD_EXECUTABLE)
 
 ########################
+ifeq ($(strip $(BOARD_WLAN_DEVICE)), UNITE)
+include $(CLEAR_VARS)
+LOCAL_MODULE := bcm_wpa_supplicant
+LOCAL_PROPRIETARY_MODULE := true
+LOCAL_MODULE_RELATIVE_PATH := hw
+ifdef CONFIG_DRIVER_CUSTOM
+LOCAL_STATIC_LIBRARIES := libCustomWifi
+endif
+ifneq ($(BOARD_WPA_SUPPLICANT_PRIVATE_LIB_BCM),)
+LOCAL_STATIC_LIBRARIES += $(BOARD_WPA_SUPPLICANT_PRIVATE_LIB_BCM)
+endif
+LOCAL_SHARED_LIBRARIES := libc libcutils liblog
+ifdef CONFIG_EAP_PROXY
+LOCAL_STATIC_LIBRARIES += $(LIB_STATIC_EAP_PROXY)
+LOCAL_SHARED_LIBRARIES += $(LIB_SHARED_EAP_PROXY)
+endif
+ifeq ($(CONFIG_TLS), openssl)
+LOCAL_SHARED_LIBRARIES += libcrypto libssl libkeystore-wifi-hidl
+endif
+
+# With BoringSSL we need libkeystore-engine in order to provide access to
+# keystore keys.
+LOCAL_SHARED_LIBRARIES += libkeystore-engine-wifi-hidl
+
+ifdef CONFIG_DRIVER_NL80211
+ifneq ($(wildcard external/libnl),)
+LOCAL_SHARED_LIBRARIES += libnl
+else
+LOCAL_STATIC_LIBRARIES += libnl_2
+endif
+endif
+LOCAL_CFLAGS := $(L_CFLAGS)
+LOCAL_SRC_FILES := $(OBJS)
+LOCAL_C_INCLUDES := $(INCLUDES)
+ifeq ($(DBUS), y)
+LOCAL_SHARED_LIBRARIES += libdbus
+endif
+ifeq ($(WPA_SUPPLICANT_USE_HIDL), y)
+LOCAL_SHARED_LIBRARIES += android.hardware.wifi.supplicant@1.0
+LOCAL_SHARED_LIBRARIES += android.hardware.wifi.supplicant@1.1
+LOCAL_SHARED_LIBRARIES += libhidlbase libhidltransport libhwbinder libutils libbase
+LOCAL_STATIC_LIBRARIES += libwpa_hidl
+endif
+include $(BUILD_EXECUTABLE)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := qca_wpa_supplicant
+LOCAL_PROPRIETARY_MODULE := true
+LOCAL_MODULE_RELATIVE_PATH := hw
+ifdef CONFIG_DRIVER_CUSTOM
+LOCAL_STATIC_LIBRARIES := libCustomWifi
+endif
+ifneq ($(BOARD_WPA_SUPPLICANT_PRIVATE_LIB_QCOM),)
+LOCAL_STATIC_LIBRARIES += $(BOARD_WPA_SUPPLICANT_PRIVATE_LIB_QCOM)
+endif
+LOCAL_SHARED_LIBRARIES := libc libcutils liblog
+ifdef CONFIG_EAP_PROXY
+LOCAL_STATIC_LIBRARIES += $(LIB_STATIC_EAP_PROXY)
+LOCAL_SHARED_LIBRARIES += $(LIB_SHARED_EAP_PROXY)
+endif
+ifeq ($(CONFIG_TLS), openssl)
+LOCAL_SHARED_LIBRARIES += libcrypto libssl libkeystore-wifi-hidl
+endif
+
+# With BoringSSL we need libkeystore-engine in order to provide access to
+# keystore keys.
+LOCAL_SHARED_LIBRARIES += libkeystore-engine-wifi-hidl
+
+ifdef CONFIG_DRIVER_NL80211
+ifneq ($(wildcard external/libnl),)
+LOCAL_SHARED_LIBRARIES += libnl
+else
+LOCAL_STATIC_LIBRARIES += libnl_2
+endif
+endif
+LOCAL_CFLAGS := $(L_CFLAGS)
+LOCAL_SRC_FILES := $(OBJS)
+LOCAL_C_INCLUDES := $(INCLUDES)
+ifeq ($(DBUS), y)
+LOCAL_SHARED_LIBRARIES += libdbus
+endif
+ifeq ($(WPA_SUPPLICANT_USE_HIDL), y)
+LOCAL_SHARED_LIBRARIES += android.hardware.wifi.supplicant@1.0
+LOCAL_SHARED_LIBRARIES += android.hardware.wifi.supplicant@1.1
+LOCAL_SHARED_LIBRARIES += libhidlbase libhidltransport libhwbinder libutils libbase
+LOCAL_STATIC_LIBRARIES += libwpa_hidl
+endif
+include $(BUILD_EXECUTABLE)
+endif
+
+########################
 #
 #include $(CLEAR_VARS)
 #LOCAL_MODULE := eapol_test
