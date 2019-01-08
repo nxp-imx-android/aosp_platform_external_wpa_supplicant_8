@@ -302,12 +302,10 @@ Supplicant::addInterfaceInternal(const IfaceInfo& iface_info)
 		iface_params.confname = kStaIfaceConfPath;
 
 		char UNITE_VENDOR_NAME[PROPERTY_VALUE_MAX] = {'\0'};
-		property_get("ro.boot.wifivendor", UNITE_VENDOR_NAME, NULL);
+		property_get("ro.boot.wifivendor", UNITE_VENDOR_NAME, "NULL");
 		if (strcmp(UNITE_VENDOR_NAME, "NULL") != 0) {
 			char kUniteStaIfaceConfOverlayPath[PROPERTY_VALUE_MAX];
-			strcpy(kUniteStaIfaceConfOverlayPath,"/vendor/etc/wifi/");
-			strcat(kUniteStaIfaceConfOverlayPath,UNITE_VENDOR_NAME);
-			strcat(kUniteStaIfaceConfOverlayPath,"_supplicant_overlay.conf");
+			sprintf(kUniteStaIfaceConfOverlayPath,"/vendor/etc/wifi/%s_wpa_supplicant_overlay.conf",UNITE_VENDOR_NAME);
 			int ret = access(kUniteStaIfaceConfOverlayPath, R_OK);
 			if (ret == 0) {
 				iface_params.confanother = kUniteStaIfaceConfOverlayPath;
