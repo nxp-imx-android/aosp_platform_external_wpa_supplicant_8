@@ -1730,7 +1730,7 @@ endif
 include $(BUILD_EXECUTABLE)
 
 ########################
-ifeq ($(strip $(BOARD_WLAN_DEVICE)), UNITE)
+ifeq ($(strip $(BOARD_WLAN_DEVICE_UNITE)), UNITE)
 include $(CLEAR_VARS)
 LOCAL_MODULE := bcm_wpa_supplicant
 LOCAL_PROPRIETARY_MODULE := true
