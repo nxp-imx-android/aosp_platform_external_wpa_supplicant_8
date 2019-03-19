@@ -1124,7 +1124,7 @@ LOCAL_INIT_RC := hostapd.android.rc
 include $(BUILD_EXECUTABLE)
 
 ########################
-ifeq ($(strip $(BOARD_WLAN_DEVICE)), UNITE)
+ifeq ($(strip $(BOARD_WLAN_DEVICE_UNITE)), UNITE)
 include $(CLEAR_VARS)
 LOCAL_MODULE := bcm_hostapd
 LOCAL_MODULE_TAGS := optional
