@@ -288,6 +288,11 @@ int wpa_driver_set_p2p_ps(void *priv, int legacy_ps, int opp_ps, int ctwindow);
 int wpa_driver_set_ap_wps_p2p_ie(void *priv, const struct wpabuf *beacon,
 				 const struct wpabuf *proberesp,
 				 const struct wpabuf *assocresp);
+#ifdef CONFIG_BCMDHD_P2P
+int wpa_driver_set_ap_wps_p2p_ie_bcm(void *priv, const struct wpabuf *beacon,
+				 const struct wpabuf *proberesp,
+				 const struct wpabuf *assocresp);
+#endif
 #endif /* ANDROID_P2P */
 #endif /* ANDROID */
 
