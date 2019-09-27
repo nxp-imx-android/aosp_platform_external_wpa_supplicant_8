@@ -179,6 +179,15 @@ int wpa_driver_set_ap_wps_p2p_ie(void *priv, const struct wpabuf *beacon,
 }
 
 #endif /* ANDROID_LIB_STUB */
+
+#ifdef CONFIG_BCMDHD_P2P /* ANDROID_BCMDHD_P2P */
+int wpa_driver_set_ap_wps_p2p_ie_bcm(void *priv, const struct wpabuf *beacon,
+				 const struct wpabuf *proberesp,
+				 const struct wpabuf *assocresp)
+{
+	return 0;
+}
+#endif /* ANDROID_BCMDHD_P2P */
 #endif /* ANDROID_P2P */
 
 

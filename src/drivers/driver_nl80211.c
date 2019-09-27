@@ -10976,7 +10976,11 @@ const struct wpa_driver_ops wpa_driver_nl80211_ops = {
 #ifdef ANDROID_P2P
 	.set_noa = wpa_driver_set_p2p_noa,
 	.get_noa = wpa_driver_get_p2p_noa,
+#ifdef CONFIG_BCMDHD_P2P
+	.set_ap_wps_ie = wpa_driver_set_ap_wps_p2p_ie_bcm,
+#else
 	.set_ap_wps_ie = wpa_driver_set_ap_wps_p2p_ie,
+#endif
 #endif /* ANDROID_P2P */
 #ifdef ANDROID
 #ifndef ANDROID_LIB_STUB
