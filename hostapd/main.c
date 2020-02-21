@@ -10,6 +10,9 @@
 #ifndef CONFIG_NATIVE_WINDOWS
 #include <syslog.h>
 #include <grp.h>
+#else
+#include "msvc-posix.h"
+#include "msvc-getopt.h"
 #endif /* CONFIG_NATIVE_WINDOWS */
 
 #include "utils/common.h"
@@ -40,7 +43,6 @@ struct hapd_global {
 };
 
 static struct hapd_global global;
-
 
 #ifndef CONFIG_NO_HOSTAPD_LOGGER
 static void hostapd_logger_cb(void *ctx, const u8 *addr, unsigned int module,
@@ -408,8 +410,6 @@ static void hostapd_global_deinit(const char *pid_file, int eloop_initialized)
 #endif /* CONFIG_NATIVE_WINDOWS */
 
 	eap_server_unregister_methods();
-
-	os_daemonize_terminate(pid_file);
 }
 
 
@@ -436,10 +436,6 @@ static int hostapd_global_run(struct hapd_interfaces *ifaces, int daemonize,
 #endif /* EAP_SERVER_TNC */
 
 	if (daemonize) {
-		if (os_daemonize(pid_file)) {
-			wpa_printf(MSG_ERROR, "daemon: %s", strerror(errno));
-			return -1;
-		}
 		if (eloop_sock_requeue()) {
 			wpa_printf(MSG_ERROR, "eloop_sock_requeue: %s",
 				   strerror(errno));
@@ -562,13 +558,12 @@ static int hostapd_get_interface_names(char ***if_names,
 				       size_t *if_names_size,
 				       char *arg)
 {
-	char *if_name, *tmp, **nnames;
+	char *if_name, **nnames;
 	size_t i;
 
 	if (!arg)
 		return -1;
-	if_name = strtok_r(arg, ",", &tmp);
-
+	if_name = strtok(arg, ",");
 	while (if_name) {
 		nnames = os_realloc_array(*if_names, 1 + *if_names_size,
 					  sizeof(char *));
@@ -580,7 +575,7 @@ static int hostapd_get_interface_names(char ***if_names,
 		if (!(*if_names)[*if_names_size])
 			goto fail;
 		(*if_names_size)++;
-		if_name = strtok_r(NULL, ",", &tmp);
+		if_name = strtok(NULL, ",");
 	}
 
 	return 0;
@@ -638,7 +633,7 @@ static void hostapd_periodic(void *eloop_ctx, void *timeout_ctx)
 }
 
 
-int main(int argc, char *argv[])
+int run_hostapd_main(int argc, char *argv[])
 {
 	struct hapd_interfaces interfaces;
 	int ret = 1;
@@ -663,8 +658,8 @@ int main(int argc, char *argv[])
 	interfaces.reload_config = hostapd_reload_config;
 	interfaces.config_read_cb = hostapd_config_read;
 	interfaces.for_each_interface = hostapd_for_each_interface;
-	interfaces.ctrl_iface_init = hostapd_ctrl_iface_init;
-	interfaces.ctrl_iface_deinit = hostapd_ctrl_iface_deinit;
+	interfaces.ctrl_iface_init = NULL;
+	interfaces.ctrl_iface_deinit = NULL;
 	interfaces.driver_init = hostapd_driver_init;
 	interfaces.global_iface_path = NULL;
 	interfaces.global_iface_name = NULL;
@@ -755,7 +750,7 @@ int main(int argc, char *argv[])
 				goto out;
 			break;
 		default:
-			usage();
+			//usage();
 			break;
 		}
 	}
@@ -765,7 +760,6 @@ int main(int argc, char *argv[])
 	    num_bss_configs == 0)
 		usage();
 #endif
-
 	wpa_msg_register_ifname_cb(hostapd_msg_ifname_cb);
 
 	if (log_file)

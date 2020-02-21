@@ -5668,5 +5668,7 @@ extern const struct wpa_driver_ops wpa_driver_atheros_ops;
 #ifdef CONFIG_DRIVER_NONE
 extern const struct wpa_driver_ops wpa_driver_none_ops; /* driver_none.c */
 #endif /* CONFIG_DRIVER_NONE */
-
+#ifdef CONFIG_DRIVER_VIRTIO_WIFI
+extern const struct wpa_driver_ops wpa_driver_virtio_wifi_ops;
+#endif
 #endif /* DRIVER_H */

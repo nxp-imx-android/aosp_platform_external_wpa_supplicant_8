@@ -8,8 +8,13 @@
  */
 
 #include "utils/includes.h"
+#ifdef CONFIG_NATIVE_WINDOWS
+#include <winsock2.h>
+#else
 #include <netdb.h>
 #include <sys/un.h>
+#endif
+
 
 #include "utils/common.h"
 #include "ctrl_iface_common.h"

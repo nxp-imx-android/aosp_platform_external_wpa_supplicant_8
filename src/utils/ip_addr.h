@@ -9,6 +9,11 @@
 #ifndef IP_ADDR_H
 #define IP_ADDR_H
 
+#ifdef CONFIG_NATIVE_WINDOWS
+#include <in6addr.h>
+#include <winsock.h>
+#endif
+
 struct hostapd_ip_addr {
 	int af; /* AF_INET / AF_INET6 */
 	union {

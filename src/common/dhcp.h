@@ -9,6 +9,33 @@
 #ifndef DHCP_H
 #define DHCP_H
 
+#ifdef CONFIG_NATIVE_WINDOWS
+// copied from
+// https://github.com/microsoft/Windows-classic-samples/blob/master/Samples/Win7Samples/netds/winsock/rcvall/iphdr.h
+typedef struct iphdr
+{
+    unsigned char  ip_verlen;        // 4-bit IPv4 version
+                                     // 4-bit header length (in 32-bit words)
+    unsigned char  ip_tos;           // IP type of service
+    unsigned short ip_totallength;   // Total length
+    unsigned short ip_id;            // Unique identifier
+    unsigned short ip_offset;        // Fragment offset field
+    unsigned char  ip_ttl;           // Time to live
+    unsigned char  ip_protocol;      // Protocol(TCP,UDP etc)
+    unsigned short ip_checksum;      // IP checksum
+    unsigned int   ip_srcaddr;       // Source address
+    unsigned int   ip_destaddr;      // Source address
+} iphdr;
+
+// Copied from qemu/include/net/eth.h
+typedef struct udphdr {
+    u16 uh_sport;           /* source port */
+    u16 uh_dport;           /* destination port */
+    u16 uh_ulen;            /* udp length */
+    u16 uh_sum;             /* udp checksum */
+} udphdr;
+
+#else
 #include <netinet/ip.h>
 #if __FAVOR_BSD
 #include <netinet/udp.h>
@@ -17,6 +44,7 @@
 #include <netinet/udp.h>
 #undef __FAVOR_BSD
 #endif
+#endif /* CONFIG_NATIVE_WINDOWS */
 
 #define DHCP_SERVER_PORT 67
 #define DHCP_CLIENT_PORT 68
@@ -39,7 +67,11 @@ struct dhcp_data {
 } STRUCT_PACKED;
 
 struct bootp_pkt {
+#ifdef __APPLE__
+	struct ip iph;
+#else
 	struct iphdr iph;
+#endif
 	struct udphdr udph;
 	u8 op;
 	u8 htype;

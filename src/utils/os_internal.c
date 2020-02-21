@@ -95,7 +95,7 @@ int os_gmtime(os_time_t t, struct os_tm *tm)
 }
 
 
-int os_daemonize(const char *pid_file)
+int hostapd_os_daemonize(const char *pid_file)
 {
 	if (daemon(0, 0)) {
 		wpa_printf(MSG_ERROR, "daemon: %s", strerror(errno));
