@@ -237,7 +237,7 @@ struct wpabuf * eap_server_tls_build_msg(struct eap_ssl_data *data,
 		wpabuf_free(data->tls_out);
 		data->tls_out = NULL;
 		data->tls_out_pos = 0;
-		data->state = MSG;
+		data->state = EAP_MSG;
 	} else {
 		wpa_printf(MSG_DEBUG, "SSL: Sending out %lu bytes "
 			   "(%lu more to send)", (unsigned long) send_len,
@@ -421,7 +421,7 @@ static int eap_server_tls_reassemble(struct eap_ssl_data *data, u8 flags,
 
 	if (data->state == FRAG_ACK) {
 		wpa_printf(MSG_DEBUG, "SSL: All fragments received");
-		data->state = MSG;
+		data->state = EAP_MSG;
 	}
 
 	if (data->tls_in == NULL) {

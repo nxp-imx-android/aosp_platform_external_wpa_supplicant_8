@@ -48,7 +48,7 @@ struct eap_ssl_data {
 	 */
 	struct eap_sm *eap;
 
-	enum { MSG, FRAG_ACK, WAIT_FRAG_ACK } state;
+	enum { EAP_MSG, FRAG_ACK, WAIT_FRAG_ACK } state;
 	struct wpabuf tmpbuf;
 
 	/**

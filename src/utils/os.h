@@ -148,7 +148,7 @@ int os_gmtime(os_time_t t, struct os_tm *tm);
  * @pid_file: File name to write the process ID to or %NULL to skip this
  * Returns: 0 on success, -1 on failure
  */
-int os_daemonize(const char *pid_file);
+int hostapd_os_daemonize(const char *pid_file);
 
 /**
  * os_daemonize_terminate - Stop running in the background (remove pid file)

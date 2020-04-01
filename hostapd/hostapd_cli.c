@@ -2095,7 +2095,7 @@ int main(int argc, char *argv[])
 
 	if (action_file && !hostapd_cli_attached)
 		return -1;
-	if (daemonize && os_daemonize(pid_file) && eloop_sock_requeue())
+	if (daemonize && hostapd_os_daemonize(pid_file) && eloop_sock_requeue())
 		return -1;
 
 	if (interactive)

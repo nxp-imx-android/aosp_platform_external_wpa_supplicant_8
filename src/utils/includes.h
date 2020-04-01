@@ -40,6 +40,11 @@
 #include <sys/uio.h>
 #include <sys/time.h>
 #endif /* __vxworks */
+#else
+#include <winsock2.h>
+#include <windows.h>
+#include <ws2tcpip.h>
 #endif /* CONFIG_NATIVE_WINDOWS */
+
 
 #endif /* INCLUDES_H */

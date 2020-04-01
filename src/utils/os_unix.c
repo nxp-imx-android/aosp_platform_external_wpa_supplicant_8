@@ -220,7 +220,7 @@ static int os_daemon(int nochdir, int noclose)
 #endif /* __APPLE__ */
 
 
-int os_daemonize(const char *pid_file)
+int hostapd_os_daemonize(const char *pid_file)
 {
 #if defined(__uClinux__) || defined(__sun__)
 	return -1;

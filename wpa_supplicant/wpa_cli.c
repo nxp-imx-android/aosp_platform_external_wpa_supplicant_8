@@ -4706,7 +4706,7 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		if (daemonize && os_daemonize(pid_file) && eloop_sock_requeue())
+		if (daemonize && hostapd_os_daemonize(pid_file) && eloop_sock_requeue())
 			return -1;
 
 		if (action_file)
