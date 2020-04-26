@@ -4434,7 +4434,7 @@ struct wpa_driver_ops {
 	 * This optional callback can be used to update RX frame filtering to
 	 * explicitly allow reception of broadcast Public Action frames.
 	 */
-	int (*dpp_listen)(void *priv, bool enable);
+	int (*dpp_listen)(void *priv, int enable);
 };
 
 /**

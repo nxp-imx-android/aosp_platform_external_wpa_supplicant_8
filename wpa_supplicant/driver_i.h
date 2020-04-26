@@ -1108,7 +1108,7 @@ static inline int wpa_drv_set_4addr_mode(struct wpa_supplicant *wpa_s, int val)
 					     wpa_s->bridge_ifname, val);
 }
 
-static inline int wpa_drv_dpp_listen(struct wpa_supplicant *wpa_s, bool enable)
+static inline int wpa_drv_dpp_listen(struct wpa_supplicant *wpa_s, int enable)
 {
 	if (!wpa_s->driver->dpp_listen)
 		return 0;
