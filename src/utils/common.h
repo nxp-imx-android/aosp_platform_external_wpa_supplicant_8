@@ -548,8 +548,9 @@ void int_array_concat(int **res, const int *a);
 void int_array_sort_unique(int *a);
 void int_array_add_unique(int **res, int a);
 
+#ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
-
+#endif
 void str_clear_free(char *str);
 void bin_clear_free(void *bin, size_t len);
 
