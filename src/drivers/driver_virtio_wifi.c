@@ -153,10 +153,7 @@ static void *virtio_wifi_init(struct hostapd_data *hapd,
 
 static void virtio_wifi_deinit(void *priv) {
 	struct virtio_wifi_data *drv = priv;
-	if (drv->ioctl_sock >= 0)
-		close(drv->ioctl_sock);
-	if (drv->sock >= 0)
-		close(drv->sock);
+	eloop_unregister_read_sock(drv->sock);
 	free(drv);
 }
 
