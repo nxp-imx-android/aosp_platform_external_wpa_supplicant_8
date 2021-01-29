@@ -26,9 +26,6 @@ L_CFLAGS += -DANDROID_LOG_NAME=\"hostapd\"
 
 L_CFLAGS += -Wall -Werror
 
-# TODO: move off readdir_r upstream, pull fix back (http://b/72326431).
-L_CFLAGS += -Wno-error-deprecated-declarations
-
 # Disable unused parameter warnings
 L_CFLAGS += -Wno-unused-parameter
 
@@ -552,6 +549,12 @@ endif
 ifdef CONFIG_DPP
 L_CFLAGS += -DCONFIG_DPP
 OBJS += src/common/dpp.c
+OBJS += src/common/dpp_auth.c
+OBJS += src/common/dpp_backup.c
+OBJS += src/common/dpp_crypto.c
+OBJS += src/common/dpp_pkex.c
+OBJS += src/common/dpp_reconfig.c
+OBJS += src/common/dpp_tcp.c
 OBJS += src/ap/dpp_hostapd.c
 OBJS += src/ap/gas_query_ap.c
 NEED_AES_SIV=y

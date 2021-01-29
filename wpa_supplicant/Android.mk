@@ -41,9 +41,6 @@ L_CFLAGS += -Wno-parentheses-equality
 # Disable sign compare warnings
 L_CFLAGS += -Wno-sign-compare
 
-# TODO: move off readdir_r upstream, pull fix back (http://b/72326431).
-L_CFLAGS += -Wno-error-deprecated-declarations
-
 # Disable unused function warnings
 L_CFLAGS += -Wno-unused-function
 
@@ -277,6 +274,12 @@ endif
 ifdef CONFIG_DPP
 L_CFLAGS += -DCONFIG_DPP
 OBJS += src/common/dpp.c
+OBJS += src/common/dpp_auth.c
+OBJS += src/common/dpp_backup.c
+OBJS += src/common/dpp_crypto.c
+OBJS += src/common/dpp_pkex.c
+OBJS += src/common/dpp_reconfig.c
+OBJS += src/common/dpp_tcp.c
 OBJS += dpp_supplicant.c
 NEED_AES_SIV=y
 NEED_HMAC_SHA256_KDF=y
