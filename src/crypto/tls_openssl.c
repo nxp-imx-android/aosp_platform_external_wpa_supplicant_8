@@ -163,11 +163,32 @@ static int tls_add_ca_from_keystore(X509_STORE *ctx, const char *key_alias)
 	BIO *bio = BIO_from_keystore(key_alias);
 	STACK_OF(X509_INFO) *stack = NULL;
 	stack_index_t i;
+	int ret = 0;
 
-	if (bio) {
-		stack = PEM_X509_INFO_read_bio(bio, NULL, NULL, NULL);
-		BIO_free(bio);
+	if (!bio) {
+		wpa_printf(MSG_ERROR, "TLS: Failed to parse certificate: %s",
+			   key_alias);
+		return -1;
 	}
+
+	// Try DER encoding first
+	X509 *x509 = d2i_X509_bio(bio, NULL);
+	if (x509) {
+		while (x509) {
+			if (!X509_STORE_add_cert(ctx, x509)) {
+				wpa_printf(MSG_ERROR, "TLS: Failed to add Root CA certificate");
+				ret = -1;
+				break;
+			}
+			x509 = d2i_X509_bio(bio, NULL);
+		}
+		BIO_free(bio);
+		return ret;
+	}
+
+	// Try PEM encoding
+	stack = PEM_X509_INFO_read_bio(bio, NULL, NULL, NULL);
+	BIO_free(bio);
 
 	if (!stack) {
 		wpa_printf(MSG_WARNING, "TLS: Failed to parse certificate: %s",
@@ -179,14 +200,17 @@ static int tls_add_ca_from_keystore(X509_STORE *ctx, const char *key_alias)
 		X509_INFO *info = sk_X509_INFO_value(stack, i);
 
 		if (info->x509)
-			X509_STORE_add_cert(ctx, info->x509);
+			if (!X509_STORE_add_cert(ctx, info->x509)) {
+				wpa_printf(MSG_ERROR, "TLS: Failed to add Root CA certificate");
+				ret = -1;
+				break;
+			}
 		if (info->crl)
 			X509_STORE_add_crl(ctx, info->crl);
 	}
 
 	sk_X509_INFO_pop_free(stack, X509_INFO_free);
-
-	return 0;
+	return ret;
 }
 
 
@@ -279,6 +303,7 @@ struct tls_connection {
 	X509 *peer_cert;
 	X509 *peer_issuer;
 	X509 *peer_issuer_issuer;
+	char *peer_subject; /* peer subject info for authenticated peer */
 
 	unsigned char client_random[SSL3_RANDOM_SIZE];
 	unsigned char server_random[SSL3_RANDOM_SIZE];
@@ -1058,6 +1083,8 @@ void * tls_init(const struct tls_config *conf)
 	SSL_CTX_set_options(ssl, SSL_OP_NO_SSLv2);
 	SSL_CTX_set_options(ssl, SSL_OP_NO_SSLv3);
 
+	SSL_CTX_set_mode(ssl, SSL_MODE_AUTO_RETRY);
+
 #ifdef SSL_MODE_NO_AUTO_CHAIN
 	/* Number of deployed use cases assume the default OpenSSL behavior of
 	 * auto chaining the local certificate is in use. BoringSSL removed this
@@ -1643,6 +1670,7 @@ void tls_connection_deinit(void *ssl_ctx, struct tls_connection *conn)
 	os_free(conn->domain_match);
 	os_free(conn->check_cert_subject);
 	os_free(conn->session_ticket);
+	os_free(conn->peer_subject);
 	os_free(conn);
 }
 
@@ -2597,6 +2625,11 @@ static int tls_verify_cb(int preverify_ok, X509_STORE_CTX *x509_ctx)
 		context->event_cb(context->cb_ctx,
 				  TLS_CERT_CHAIN_SUCCESS, NULL);
 
+	if (depth == 0 && preverify_ok) {
+		os_free(conn->peer_subject);
+		conn->peer_subject = os_strdup(buf);
+	}
+
 	return preverify_ok;
 }
 
@@ -3006,16 +3039,12 @@ static int tls_set_conn_flags(struct tls_connection *conn, unsigned int flags,
 
 		/* Explicit request to enable TLS versions even if needing to
 		 * override systemwide policies. */
-		if (flags & TLS_CONN_ENABLE_TLSv1_0) {
+		if (flags & TLS_CONN_ENABLE_TLSv1_0)
 			version = TLS1_VERSION;
-		} else if (flags & TLS_CONN_ENABLE_TLSv1_1) {
-			if (!(flags & TLS_CONN_DISABLE_TLSv1_0))
-				version = TLS1_1_VERSION;
-		} else if (flags & TLS_CONN_ENABLE_TLSv1_2) {
-			if (!(flags & (TLS_CONN_DISABLE_TLSv1_0 |
-				       TLS_CONN_DISABLE_TLSv1_1)))
-				version = TLS1_2_VERSION;
-		}
+		else if (flags & TLS_CONN_ENABLE_TLSv1_1)
+			version = TLS1_1_VERSION;
+		else if (flags & TLS_CONN_ENABLE_TLSv1_2)
+			version = TLS1_2_VERSION;
 		if (!version) {
 			wpa_printf(MSG_DEBUG,
 				   "OpenSSL: Invalid TLS version configuration");
@@ -3029,6 +3058,18 @@ static int tls_set_conn_flags(struct tls_connection *conn, unsigned int flags,
 		}
 	}
 #endif /* >= 1.1.0 */
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L && \
+	!defined(LIBRESSL_VERSION_NUMBER) && \
+	!defined(OPENSSL_IS_BORINGSSL)
+	if ((flags & (TLS_CONN_ENABLE_TLSv1_0 | TLS_CONN_ENABLE_TLSv1_1)) &&
+	    SSL_get_security_level(ssl) >= 2) {
+		/*
+		 * Need to drop to security level 1 to allow TLS versions older
+		 * than 1.2 to be used when explicitly enabled in configuration.
+		 */
+		SSL_set_security_level(conn->ssl, 1);
+	}
+#endif
 
 #ifdef CONFIG_SUITEB
 #ifdef OPENSSL_IS_BORINGSSL
@@ -3198,7 +3239,11 @@ int tls_connection_set_verify(void *ssl_ctx, struct tls_connection *conn,
 	if (conn == NULL)
 		return -1;
 
-	if (verify_peer) {
+	if (verify_peer == 2) {
+		conn->ca_cert_verify = 1;
+		SSL_set_verify(conn->ssl, SSL_VERIFY_PEER |
+			       SSL_VERIFY_CLIENT_ONCE, tls_verify_cb);
+	} else if (verify_peer) {
 		conn->ca_cert_verify = 1;
 		SSL_set_verify(conn->ssl, SSL_VERIFY_PEER |
 			       SSL_VERIFY_FAIL_IF_NO_PEER_CERT |
@@ -3259,8 +3304,36 @@ static int tls_connection_client_cert(struct tls_connection *conn,
 			   "OK");
 		return 0;
 	} else if (client_cert_blob) {
+#if defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER < 0x20901000L
 		tls_show_errors(MSG_DEBUG, __func__,
 				"SSL_use_certificate_ASN1 failed");
+#else
+		BIO *bio;
+		X509 *x509;
+
+		tls_show_errors(MSG_DEBUG, __func__,
+				"SSL_use_certificate_ASN1 failed");
+		bio = BIO_new(BIO_s_mem());
+		if (!bio)
+			return -1;
+		BIO_write(bio, client_cert_blob, client_cert_blob_len);
+		x509 = PEM_read_bio_X509(bio, NULL, NULL, NULL);
+		if (!x509 || SSL_use_certificate(conn->ssl, x509) != 1) {
+			X509_free(x509);
+			BIO_free(bio);
+			return -1;
+		}
+		X509_free(x509);
+		wpa_printf(MSG_DEBUG,
+			   "OpenSSL: Found PEM encoded certificate from blob");
+		while ((x509 = PEM_read_bio_X509(bio, NULL, NULL, NULL))) {
+			wpa_printf(MSG_DEBUG,
+				   "OpenSSL: Added an additional certificate into the chain");
+			SSL_add0_chain_cert(conn->ssl, x509);
+		}
+		BIO_free(bio);
+		return 0;
+#endif
 	}
 
 	if (client_cert == NULL)
@@ -3272,7 +3345,16 @@ static int tls_connection_client_cert(struct tls_connection *conn,
 		X509 *x509 = NULL;
 		int ret = -1;
 		if (bio) {
-			x509 = PEM_read_bio_X509(bio, NULL, NULL, NULL);
+			// Try DER encoding first
+			x509 = d2i_X509_bio(bio, NULL);
+			if (!x509) {
+				// Maybe this bio is actually PEM encoded.
+				x509 = PEM_read_bio_X509(bio, NULL, NULL, NULL);
+				if (!x509) {
+					wpa_printf(MSG_ERROR, "tls_connection_client_cert: "
+							"Unknown certificate encoding.");
+				}
+			}
 		}
 		if (x509) {
 			if (SSL_use_certificate(conn->ssl, x509) == 1)
@@ -3766,6 +3848,17 @@ static int tls_connection_private_key(struct tls_data *data,
 			ok = 1;
 			break;
 		}
+
+#ifndef OPENSSL_NO_EC
+		if (SSL_use_PrivateKey_ASN1(EVP_PKEY_EC, conn->ssl,
+					    (u8 *) private_key_blob,
+					    private_key_blob_len) == 1) {
+			wpa_printf(MSG_DEBUG,
+				   "OpenSSL: SSL_use_PrivateKey_ASN1(EVP_PKEY_EC) --> OK");
+			ok = 1;
+			break;
+		}
+#endif /* OPENSSL_NO_EC */
 
 		if (SSL_use_RSAPrivateKey_ASN1(conn->ssl,
 					       (u8 *) private_key_blob,
@@ -4503,10 +4596,18 @@ struct wpabuf * tls_connection_decrypt(void *tls_ctx,
 		return NULL;
 	res = SSL_read(conn->ssl, wpabuf_mhead(buf), wpabuf_size(buf));
 	if (res < 0) {
-		tls_show_errors(MSG_INFO, __func__,
-				"Decryption failed - SSL_read");
-		wpabuf_free(buf);
-		return NULL;
+		int err = SSL_get_error(conn->ssl, res);
+
+		if (err == SSL_ERROR_WANT_READ) {
+			wpa_printf(MSG_DEBUG,
+				   "SSL: SSL_connect - want more data");
+			res = 0;
+		} else {
+			tls_show_errors(MSG_INFO, __func__,
+					"Decryption failed - SSL_read");
+			wpabuf_free(buf);
+			return NULL;
+		}
 	}
 	wpabuf_put(buf, res);
 
@@ -5103,8 +5204,10 @@ int tls_connection_set_params(void *tls_ctx, struct tls_connection *conn,
 					     params->altsubject_match,
 					     params->suffix_match,
 					     params->domain_match,
-					     params->check_cert_subject))
+					     params->check_cert_subject)) {
+		wpa_printf(MSG_ERROR, "TLS: Failed to set subject match");
 		return -1;
+	}
 
 	if (engine_id && ca_cert_id) {
 		if (tls_connection_engine_ca_cert(data, conn, ca_cert_id))
@@ -5112,16 +5215,20 @@ int tls_connection_set_params(void *tls_ctx, struct tls_connection *conn,
 	} else if (tls_connection_ca_cert(data, conn, params->ca_cert,
 					  params->ca_cert_blob,
 					  params->ca_cert_blob_len,
-					  params->ca_path))
+					  params->ca_path)) {
+		wpa_printf(MSG_ERROR, "TLS: Failed to parse Root CA certificate");
 		return -1;
+	}
 
 	if (engine_id && cert_id) {
 		if (tls_connection_engine_client_cert(conn, cert_id))
 			return TLS_SET_PARAMS_ENGINE_PRV_VERIFY_FAILED;
 	} else if (tls_connection_client_cert(conn, params->client_cert,
 					      params->client_cert_blob,
-					      params->client_cert_blob_len))
+					      params->client_cert_blob_len)) {
+		wpa_printf(MSG_ERROR, "TLS: Failed to parse client certificate");
 		return -1;
+	}
 
 	if (engine_id && key_id) {
 		wpa_printf(MSG_DEBUG, "TLS: Using private key from engine");
@@ -5196,8 +5303,10 @@ int tls_connection_set_params(void *tls_ctx, struct tls_connection *conn,
 	}
 
 	if (tls_set_conn_flags(conn, params->flags,
-			       params->openssl_ciphers) < 0)
+			       params->openssl_ciphers) < 0) {
+		wpa_printf(MSG_ERROR, "TLS: Failed to set connection flags");
 		return -1;
+	}
 
 #ifdef OPENSSL_IS_BORINGSSL
 	if (params->flags & TLS_CONN_REQUEST_OCSP) {
@@ -5282,6 +5391,9 @@ static void openssl_debug_dump_certificate(int i, X509 *cert)
 	EVP_PKEY *pkey;
 	ASN1_INTEGER *ser;
 	char serial_num[128];
+
+	if (!cert)
+		return;
 
 	X509_NAME_oneline(X509_get_subject_name(cert), buf, sizeof(buf));
 
@@ -5666,4 +5778,20 @@ u16 tls_connection_get_cipher_suite(struct tls_connection *conn)
 #else
 	return SSL_CIPHER_get_id(cipher) & 0xFFFF;
 #endif
+}
+
+
+const char * tls_connection_get_peer_subject(struct tls_connection *conn)
+{
+	if (conn)
+		return conn->peer_subject;
+	return NULL;
+}
+
+
+bool tls_connection_get_own_cert_used(struct tls_connection *conn)
+{
+	if (conn)
+		return SSL_get_certificate(conn->ssl) != NULL;
+	return false;
 }
