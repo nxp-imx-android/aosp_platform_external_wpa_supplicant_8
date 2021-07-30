@@ -288,6 +288,20 @@ static const u8 * virtio_wifi_get_macaddr(void *priv)
 	return drv->perm_addr;
 }
 
+static int virtio_wifi_set_ap(void *priv, struct wpa_driver_ap_params *params) {
+	struct virtio_wifi_data *drv = priv;
+	struct ieee80211_hdr *hdr;
+	size_t total_len = params->head_len + params->tail_len;
+	hdr = os_zalloc(total_len);
+	os_memcpy((u8 *)hdr, params->head, params->head_len);
+	os_memcpy(((u8 *)hdr) + params->head_len, params->tail, params->tail_len);
+	socket_send(drv->sock, hdr, total_len);
+	/* Request TX callback, assume that they have always been received */
+	handle_tx_callback(drv, (u8 *)hdr, total_len, 1);
+	os_free(hdr);
+	return 0;
+}
+
 const struct wpa_driver_ops wpa_driver_virtio_wifi_ops = {
 	.name = "virtio_wifi",
 	.desc = "Qemu virtio WiFi",
@@ -296,6 +310,7 @@ const struct wpa_driver_ops wpa_driver_virtio_wifi_ops = {
 	.get_hw_feature_data = virtio_wifi_get_hw_feature_data,
 	.hapd_send_eapol = virtio_wifi_send_eapol,
 	.send_mlme = virtio_wifi_send_mlme,
+	.set_ap = virtio_wifi_set_ap,
 	.hapd_init = virtio_wifi_init,
 	.hapd_deinit = virtio_wifi_deinit,
 };
