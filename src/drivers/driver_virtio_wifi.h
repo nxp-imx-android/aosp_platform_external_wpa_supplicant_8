@@ -8,13 +8,17 @@
 
 extern void set_virtio_sock(int sock);
 extern void set_virtio_ctl_sock(int sock);
-struct hostapd_data;
 
-struct virtio_wifi_data {
-	struct hostapd_data *hapd;
-	int sock; /* raw packet socket */
-	int ioctl_sock; /* control cmds socket */
-	u8 perm_addr[ETH_ALEN];
+#define MAX_KEY_MATERIAL_LEN 32 /* max key length is 32 bytes */
+
+struct virtio_wifi_key_data {
+	u8 key_material[MAX_KEY_MATERIAL_LEN];
+	int key_len;
+	int key_idx;
 };
+
+// There is at most one active key in use.
+extern struct virtio_wifi_key_data get_active_ptk();
+extern struct virtio_wifi_key_data get_active_gtk();
 
 #endif

@@ -14,48 +14,39 @@
 #include "ap/hostapd.h"
 #include "common/ieee802_11_defs.h"
 #include "common/ieee802_11_common.h"
+#include "common/wpa_common.h"
 
 #define IEEE80211_MAX_FRAME_LEN		2352
 
-static void handle_data(struct virtio_wifi_data *drv, u8 *buf, size_t len,
+struct virtio_wifi_data {
+	struct hostapd_data *hapd;
+	int sock; /* raw packet socket */
+	int ioctl_sock; /* control cmds socket */
+	u8 perm_addr[ETH_ALEN];
+	struct virtio_wifi_key_data PTK; /* Pairwise Temporal Key */
+	struct virtio_wifi_key_data GTK; /* Group Temporal Key */
+};
+
+static const unsigned char s_bssid[] = { 0x00, 0x13, 0x10, 0x85, 0xfe, 0x01 };
+
+static const unsigned char rfc1042_header[] = { 0xaa, 0xaa, 0x03, 0x00, 0x00, 0x00 };
+
+static struct virtio_wifi_data * priv_drv = NULL;
+
+static void handle_eapol(struct virtio_wifi_data *drv, u8 *buf, size_t len,
 			u16 stype)
 {
 	struct ieee80211_hdr *hdr;
-	u16 fc, ethertype;
-	u8 *pos, *sa;
-	size_t left;
-	union wpa_event_data event;
-
-	if (len < sizeof(struct ieee80211_hdr))
-		return;
-
+	u8 *sa;
+	size_t skipped_len;
 	hdr = (struct ieee80211_hdr *) buf;
-	fc = le_to_host16(hdr->frame_control);
-
-	/*if ((fc & (WLAN_FC_FROMDS | WLAN_FC_TODS)) != WLAN_FC_TODS) {
-		printf("Not ToDS data frame (fc=0x%04x)\n", fc);
-		return;
-	}*/
-
 	sa = hdr->addr2;
-	os_memset(&event, 0, sizeof(event));
-	pos = (u8 *) (hdr + 1);
-	left = len - sizeof(*hdr);
-	if (left < 2) {
-		printf("No ethertype in data frame\n");
-		return;
-	}
-	ethertype = WPA_GET_BE16(pos);
-	pos += 2;
-	left -= 2;
-	switch (ethertype) {
-	case ETH_P_PAE:
-		drv_event_eapol_rx(drv->hapd, sa, pos, left);
-		break;
-
-	default:
-		printf("Unknown ethertype 0x%04x in data frame\n", ethertype);
-		break;
+	skipped_len = IEEE80211_HDRLEN + sizeof(rfc1042_header) + 2;
+	if (len > skipped_len) {
+		drv_event_eapol_rx(drv->hapd, sa, buf + skipped_len, len - skipped_len);
+	} else {
+		wpa_printf(MSG_DEBUG, "virtio_wifi: eapol frame is too short, length: %zu \n",
+			   len);
 	}
 }
 
@@ -79,6 +70,25 @@ static void handle_tx_callback(struct virtio_wifi_data *drv, const u8 *buf,
 	wpa_supplicant_event(drv->hapd, EVENT_TX_STATUS, &event);
 }
 
+static void handle_tx_eapol_callback(struct virtio_wifi_data *drv, const u8 *buf,
+			       size_t len, int ok)
+{
+	struct ieee80211_hdr *hdr;
+	u16 fc;
+	union wpa_event_data event;
+
+	hdr = (struct ieee80211_hdr *) buf;
+	fc = le_to_host16(hdr->frame_control);
+
+	os_memset(&event, 0, sizeof(event));
+	event.eapol_tx_status.dst = hdr->addr1;
+	event.eapol_tx_status.data = buf;
+	event.eapol_tx_status.data_len = len;
+	event.eapol_tx_status.ack = ok;
+
+	wpa_supplicant_event(drv->hapd, EVENT_EAPOL_TX_STATUS, &event);
+}
+
 static void handle_frame(struct virtio_wifi_data *drv, u8 *buf, size_t len)
 {
 	struct ieee80211_hdr *hdr;
@@ -98,12 +108,12 @@ static void handle_frame(struct virtio_wifi_data *drv, u8 *buf, size_t len)
 		wpa_supplicant_event(drv->hapd, EVENT_RX_MGMT, &event);
 		break;
 	case WLAN_FC_TYPE_DATA:
-		handle_data(drv, buf, len, stype);
+		handle_eapol(drv, buf, len, stype);
 		break;
 	case WLAN_FC_TYPE_CTRL:
 		break;
 	default:
-		wpa_printf(MSG_ERROR, "unknown frame type %d \n",
+		wpa_printf(MSG_ERROR, "virtio_wifi: unknown frame type %d \n",
 			   type);
 		break;
 	}
@@ -117,26 +127,30 @@ static void handle_read(int sock, void *eloop_ctx, void *sock_ctx)
 	len = socket_recv(sock, buf, IEEE80211_MAX_FRAME_LEN);
 
 	if (len < 0) {
-		wpa_printf(MSG_ERROR, "recv: %s", strerror(errno));
+		wpa_printf(MSG_ERROR, "virtio_wifi: recv error: %s", strerror(errno));
 		return;
 	}
 	handle_frame(drv, buf, len);
 }
 
-static const unsigned char s_bssid[] = {0x00, 0x13, 0x10, 0x85, 0xfe, 0x01};
-
-static struct virtio_wifi_data * priv_drv = NULL;
-
 void set_virtio_sock(int sock) {
 	priv_drv->sock = sock;
-	if (priv_drv->sock != -1 && eloop_register_read_sock(priv_drv->sock, handle_read, priv_drv, NULL))
-	{
-		wpa_printf(MSG_INFO, "virtio wifi: Could not register read socket for eapol");
+	if (priv_drv->sock != -1 &&
+			eloop_register_read_sock(priv_drv->sock, handle_read, priv_drv, NULL)) {
+		wpa_printf(MSG_ERROR, "virtio_wifi: Could not register read socket for eapol");
 	}
 }
 
 void set_virtio_ctl_sock(int sock) {
 	priv_drv->ioctl_sock = sock;
+}
+
+struct virtio_wifi_key_data get_active_ptk() {
+	return priv_drv->PTK;
+}
+
+struct virtio_wifi_key_data get_active_gtk() {
+	return priv_drv->GTK;
 }
 
 static void *virtio_wifi_init(struct hostapd_data *hapd,
@@ -148,6 +162,8 @@ static void *virtio_wifi_init(struct hostapd_data *hapd,
 	drv->hapd = hapd;
 	os_memcpy(drv->perm_addr, s_bssid, ETH_ALEN);
 	os_memcpy(hapd->own_addr, s_bssid, ETH_ALEN);
+	os_memset(&drv->GTK, 0, sizeof(drv->GTK));
+	os_memset(&drv->PTK, 0, sizeof(drv->PTK));
 	return drv;
 }
 
@@ -183,12 +199,12 @@ static int virtio_wifi_send_eapol(void *priv, const u8 *addr, const u8 *data,
 	size_t len;
 	u8 *pos;
 	int res;
-
-	len = sizeof(*hdr) + 2 + data_len;
+	int qos;
+	qos = flags & WPA_STA_WMM;
+	len = sizeof(*hdr) + (qos ? 2 : 0) +
+			sizeof(rfc1042_header) + 2 + data_len;
 	hdr = os_zalloc(len);
-	if (hdr == NULL) {
-		printf("malloc() failed for hostapd_send_data(len=%lu)\n",
-		       (unsigned long) len);
+	if (!hdr) {
 		return -1;
 	}
 
@@ -197,21 +213,34 @@ static int virtio_wifi_send_eapol(void *priv, const u8 *addr, const u8 *data,
 	hdr->frame_control |= host_to_le16(WLAN_FC_FROMDS);
 	if (encrypt)
 		hdr->frame_control |= host_to_le16(WLAN_FC_ISWEP);
+	if (qos) {
+		hdr->frame_control |=
+			host_to_le16(WLAN_FC_STYPE_QOS_DATA << 4);
+	}
 	memcpy(hdr->IEEE80211_DA_FROMDS, addr, ETH_ALEN);
 	memcpy(hdr->IEEE80211_BSSID_FROMDS, own_addr, ETH_ALEN);
 	memcpy(hdr->IEEE80211_SA_FROMDS, own_addr, ETH_ALEN);
 
 	pos = (u8 *) (hdr + 1);
-	*((u16 *) pos) = htons(ETH_P_PAE);
+	if (qos) {
+		/* Set highest priority in QoS header */
+		pos[0] = 7;
+		pos[1] = 0;
+		pos += 2;
+	}
+	memcpy(pos, rfc1042_header, sizeof(rfc1042_header));
+	pos += sizeof(rfc1042_header);
+	WPA_PUT_BE16(pos, ETH_P_PAE);
 	pos += 2;
 	memcpy(pos, data, data_len);
 
-	res = virtio_wifi_send_mlme(drv, (u8 *) hdr, len, 0, 0, NULL, 0);
+	res = socket_send(drv->sock, (u8 *) hdr, len);
 	if (res < 0) {
-		wpa_printf(MSG_ERROR, "hostap_send_eapol - packet len: %lu - "
-			   "failed: %d (%s)",
+		wpa_printf(MSG_ERROR, "virtio_wifi: virtio_wifi_send_eapol -"
+			   " packet len: %lu - failed: %d (%s)",
 			   (unsigned long) len, errno, strerror(errno));
 	}
+	handle_tx_eapol_callback(drv, (u8 *)hdr, len, 1);
 	os_free(hdr);
 	return res;
 }
@@ -279,6 +308,82 @@ static struct hostapd_hw_modes * virtio_wifi_get_hw_feature_data(void *priv,
 	mode->rates[3] = 110;
 
 	return mode;
+}
+
+static u32 wpa_alg_to_cipher_suite(enum wpa_alg alg, size_t key_len)
+{
+	switch (alg) {
+	case WPA_ALG_WEP:
+		if (key_len == 5)
+			return RSN_CIPHER_SUITE_WEP40;
+		return RSN_CIPHER_SUITE_WEP104;
+	case WPA_ALG_TKIP:
+		return RSN_CIPHER_SUITE_TKIP;
+	case WPA_ALG_CCMP:
+		return RSN_CIPHER_SUITE_CCMP;
+	case WPA_ALG_GCMP:
+		return RSN_CIPHER_SUITE_GCMP;
+	case WPA_ALG_CCMP_256:
+		return RSN_CIPHER_SUITE_CCMP_256;
+	case WPA_ALG_GCMP_256:
+		return RSN_CIPHER_SUITE_GCMP_256;
+	case WPA_ALG_IGTK:
+		return RSN_CIPHER_SUITE_AES_128_CMAC;
+	case WPA_ALG_BIP_GMAC_128:
+		return RSN_CIPHER_SUITE_BIP_GMAC_128;
+	case WPA_ALG_BIP_GMAC_256:
+		return RSN_CIPHER_SUITE_BIP_GMAC_256;
+	case WPA_ALG_BIP_CMAC_256:
+		return RSN_CIPHER_SUITE_BIP_CMAC_256;
+	case WPA_ALG_SMS4:
+		return RSN_CIPHER_SUITE_SMS4;
+	case WPA_ALG_KRK:
+		return RSN_CIPHER_SUITE_KRK;
+	case WPA_ALG_NONE:
+	case WPA_ALG_PMK:
+		wpa_printf(MSG_ERROR, "virtio_wifi: Unexpected encryption algorithm %d",
+			   alg);
+		return 0;
+	}
+	return 0;
+}
+
+static int virtio_wifi_set_key(const char *ifname, void *priv,
+				  enum wpa_alg alg, const u8 *addr,
+				  int key_idx, int set_tx,
+				  const u8 *seq, size_t seq_len,
+				  const u8 *key, size_t key_len) {
+	u32 suite;
+	struct virtio_wifi_data *drv = priv;
+
+	if (alg == WPA_ALG_NONE) {
+		if (key_idx == drv->PTK.key_idx)
+			drv->PTK.key_len = 0;
+		if (key_idx == drv->GTK.key_idx)
+			drv->GTK.key_len = 0;
+		return 0;
+	}
+	suite = wpa_alg_to_cipher_suite(alg, key_len);
+	if (suite != RSN_CIPHER_SUITE_CCMP) {
+		wpa_printf(MSG_ERROR, "virtio_wifi: Unsupported encryption algorithm %d",
+				alg);
+		return -1;
+	}
+	if (key_len > MAX_KEY_MATERIAL_LEN) {
+		wpa_printf(MSG_ERROR, "virtio_wifi: key_len %zu is larger than max key len %d",
+				key_len, MAX_KEY_MATERIAL_LEN);
+		return -1;
+	}
+	if (addr && is_broadcast_ether_addr(addr)) {
+		os_memcpy(drv->GTK.key_material, key, key_len);
+		drv->GTK.key_len = key_len;
+		drv->GTK.key_idx = key_idx;
+	} else if (addr && !is_broadcast_ether_addr(addr)) {
+		os_memcpy(drv->PTK.key_material, key, key_len);
+		drv->PTK.key_len = key_len;
+		drv->PTK.key_idx = key_idx;
+	}
+	return 0;
 }
 
 static const u8 * virtio_wifi_get_macaddr(void *priv)
@@ -355,6 +460,7 @@ const struct wpa_driver_ops wpa_driver_virtio_wifi_ops = {
 	.hapd_send_eapol = virtio_wifi_send_eapol,
 	.send_mlme = virtio_wifi_send_mlme,
 	.set_ap = virtio_wifi_set_ap,
+	.set_key = virtio_wifi_set_key,
 	.sta_deauth = virtio_wifi_sta_deauth,
 	.sta_disassoc = virtio_wifi_sta_disassoc,
 	.hapd_init = virtio_wifi_init,
