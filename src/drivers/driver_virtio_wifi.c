@@ -16,12 +16,14 @@
 #include "common/ieee802_11_common.h"
 #include "common/wpa_common.h"
 
+#include "string.h"
+
 #define IEEE80211_MAX_FRAME_LEN		2352
 
 struct virtio_wifi_data {
 	struct hostapd_data *hapd;
 	int sock; /* raw packet socket */
-	int ioctl_sock; /* control cmds socket */
+	int ctrl_sock; /* control cmds socket */
 	u8 perm_addr[ETH_ALEN];
 	struct virtio_wifi_key_data PTK; /* Pairwise Temporal Key */
 	struct virtio_wifi_key_data GTK; /* Group Temporal Key */
@@ -133,16 +135,42 @@ static void handle_read(int sock, void *eloop_ctx, void *sock_ctx)
 	handle_frame(drv, buf, len);
 }
 
-void set_virtio_sock(int sock) {
+void set_virtio_sock(int sock)
+{
 	priv_drv->sock = sock;
-	if (priv_drv->sock != -1 &&
+	if (priv_drv->sock > 0 &&
 			eloop_register_read_sock(priv_drv->sock, handle_read, priv_drv, NULL)) {
 		wpa_printf(MSG_ERROR, "virtio_wifi: Could not register read socket for eapol");
 	}
 }
 
-void set_virtio_ctl_sock(int sock) {
-	priv_drv->ioctl_sock = sock;
+static void handle_ctrl_cmds(int sock, void *eloop_ctx, void *sock_ctx)
+{
+	struct virtio_wifi_data *drv = eloop_ctx;
+	int len;
+	int expected_len;
+	char buf[IEEE80211_MAX_FRAME_LEN];
+	len = socket_recv(sock, buf, IEEE80211_MAX_FRAME_LEN);
+	if (len < 0 || len > IEEE80211_MAX_FRAME_LEN) {
+		wpa_printf(MSG_ERROR, "virtio_wifi: handle_ctrl_cmds recv: %s", strerror(errno));
+		return;
+	}
+	expected_len = sizeof(VIRTIO_WIFI_CTRL_CMD_TERMINATE) - 1;
+	if (len == expected_len &&
+			!strncmp(buf, VIRTIO_WIFI_CTRL_CMD_TERMINATE, len)) {
+        eloop_terminate();
+	} else {
+		wpa_printf(MSG_ERROR, "virtio_wifi: unknow ctrl cmds %s", buf);
+	}
+}
+
+void set_virtio_ctrl_sock(int sock)
+{
+	priv_drv->ctrl_sock = sock;
+	if (priv_drv->ctrl_sock > 0 &&
+			eloop_register_read_sock(priv_drv->ctrl_sock, handle_ctrl_cmds, priv_drv, NULL)) {
+		wpa_printf(MSG_ERROR, "virtio_wifi: Could not register control socket for eapol");
+	}
 }
 
 struct virtio_wifi_key_data get_active_ptk() {
@@ -170,6 +198,8 @@ static void *virtio_wifi_init(struct hostapd_data *hapd,
 static void virtio_wifi_deinit(void *priv) {
 	struct virtio_wifi_data *drv = priv;
 	eloop_unregister_read_sock(drv->sock);
+	eloop_unregister_read_sock(drv->ctrl_sock);
+
 	free(drv);
 }
 
