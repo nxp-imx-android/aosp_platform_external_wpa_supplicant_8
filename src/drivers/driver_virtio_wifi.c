@@ -6,6 +6,7 @@
  */
 #include "includes.h"
 
+#include "android/utils/lock.h"
 #include "android/utils/sockets.h"
 #include "common.h"
 #include "driver.h"
@@ -27,6 +28,7 @@ struct virtio_wifi_data {
 	u8 perm_addr[ETH_ALEN];
 	struct virtio_wifi_key_data PTK; /* Pairwise Temporal Key */
 	struct virtio_wifi_key_data GTK; /* Group Temporal Key */
+	CReadWriteLock* rwlock;
 };
 
 static const unsigned char s_bssid[] = { 0x00, 0x13, 0x10, 0x85, 0xfe, 0x01 };
@@ -179,11 +181,25 @@ void set_virtio_ctrl_sock(int sock)
 }
 
 struct virtio_wifi_key_data get_active_ptk() {
-	return priv_drv->PTK;
+	struct virtio_wifi_key_data ret;
+	os_memset(&ret, 0, sizeof(ret));
+	if (priv_drv) {
+		android_rw_lock_read_acquire(priv_drv->rwlock);
+		ret = priv_drv->PTK;
+		android_rw_lock_read_release(priv_drv->rwlock);
+	}
+	return ret;
 }
 
 struct virtio_wifi_key_data get_active_gtk() {
-	return priv_drv->GTK;
+	struct virtio_wifi_key_data ret;
+	os_memset(&ret, 0, sizeof(ret));
+	if (priv_drv) {
+		android_rw_lock_read_acquire(priv_drv->rwlock);
+		ret = priv_drv->GTK;
+		android_rw_lock_read_release(priv_drv->rwlock);
+	}
+	return ret;
 }
 
 static void *virtio_wifi_init(struct hostapd_data *hapd,
@@ -191,21 +207,23 @@ static void *virtio_wifi_init(struct hostapd_data *hapd,
 {
 	struct virtio_wifi_data *drv;
 	drv = os_zalloc(sizeof(*drv));
-	priv_drv = drv;
 	drv->hapd = hapd;
 	os_memcpy(drv->perm_addr, s_bssid, ETH_ALEN);
 	os_memcpy(hapd->own_addr, s_bssid, ETH_ALEN);
 	os_memset(&drv->GTK, 0, sizeof(drv->GTK));
 	os_memset(&drv->PTK, 0, sizeof(drv->PTK));
+	drv->rwlock = android_rw_lock_new();
+	priv_drv = drv;
 	return drv;
 }
 
 static void virtio_wifi_deinit(void *priv) {
 	struct virtio_wifi_data *drv = priv;
+	priv_drv = NULL;
+	android_rw_lock_free(drv->rwlock);
 	eloop_unregister_read_sock(drv->sock);
 	eloop_unregister_read_sock(drv->ctrl_sock);
-
-	free(drv);
+	os_free(drv);
 }
 
 static int virtio_wifi_send_mlme(void *priv, const u8 *msg, size_t len, int noack,
@@ -389,25 +407,28 @@ static int virtio_wifi_set_key(const char *ifname, void *priv,
 				  const u8 *seq, size_t seq_len,
 				  const u8 *key, size_t key_len) {
 	u32 suite;
+	int ret = 0;
 	struct virtio_wifi_data *drv = priv;
-
+	android_rw_lock_write_acquire(drv->rwlock);
 	if (alg == WPA_ALG_NONE) {
 		if (key_idx == drv->PTK.key_idx)
 			drv->PTK.key_len = 0;
 		if (key_idx == drv->GTK.key_idx)
 			drv->GTK.key_len = 0;
-		return 0;
+		goto out;
 	}
 	suite = wpa_alg_to_cipher_suite(alg, key_len);
 	if (suite != RSN_CIPHER_SUITE_CCMP) {
 		wpa_printf(MSG_ERROR, "virtio_wifi: Unsupported encryption algorithm %d",
 				alg);
-		return -1;
+		ret = -1;
+		goto out;
 	}
 	if (key_len > MAX_KEY_MATERIAL_LEN) {
 		wpa_printf(MSG_ERROR, "virtio_wifi: key_len %zu is larger than max key len %d",
 				key_len, MAX_KEY_MATERIAL_LEN);
-		return -1;
+		ret = -1;
+		goto out;
 	}
 	if (addr && is_broadcast_ether_addr(addr)) {
 		os_memcpy(drv->GTK.key_material, key, key_len);
@@ -418,7 +439,9 @@ static int virtio_wifi_set_key(const char *ifname, void *priv,
 		drv->PTK.key_len = key_len;
 		drv->PTK.key_idx = key_idx;
 	}
-	return 0;
+out:
+	android_rw_lock_write_release(drv->rwlock);
+	return ret;
 }
 
 static const u8 * virtio_wifi_get_macaddr(void *priv)
