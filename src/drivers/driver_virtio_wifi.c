@@ -148,19 +148,24 @@ static void handle_ctrl_cmds(int sock, void *eloop_ctx, void *sock_ctx)
 {
 	struct virtio_wifi_data *drv = eloop_ctx;
 	int len;
-	int expected_len;
-	char buf[IEEE80211_MAX_FRAME_LEN];
+	char buf[IEEE80211_MAX_FRAME_LEN + 1];
 	len = socket_recv(sock, buf, IEEE80211_MAX_FRAME_LEN);
 	if (len < 0 || len > IEEE80211_MAX_FRAME_LEN) {
 		wpa_printf(MSG_ERROR, "virtio_wifi: handle_ctrl_cmds recv: %s", strerror(errno));
 		return;
 	}
-	expected_len = sizeof(VIRTIO_WIFI_CTRL_CMD_TERMINATE) - 1;
-	if (len == expected_len &&
+	if (len == (sizeof(VIRTIO_WIFI_CTRL_CMD_TERMINATE) - 1) &&
 			!strncmp(buf, VIRTIO_WIFI_CTRL_CMD_TERMINATE, len)) {
-        eloop_terminate();
+		eloop_terminate();
+	} else if (len == (sizeof(VIRTIO_WIFI_CTRL_CMD_RELOAD_CONFIG) - 1) &&
+			!strncmp(buf, VIRTIO_WIFI_CTRL_CMD_RELOAD_CONFIG, len)) {
+		if (hostapd_reload_config(drv->hapd->iface) < 0) {
+			wpa_printf(MSG_ERROR, "virtio_wifi: failed to read new configuration "
+			   "file - continuing with old.");
+		}
 	} else {
-		wpa_printf(MSG_ERROR, "virtio_wifi: unknow ctrl cmds %s", buf);
+		buf[len] = '\0';
+		wpa_printf(MSG_ERROR, "virtio_wifi: unknown ctrl cmds %s", buf);
 	}
 }
 

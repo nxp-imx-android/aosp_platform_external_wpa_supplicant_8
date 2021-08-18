@@ -18,6 +18,7 @@ struct virtio_wifi_key_data {
 };
 
 #define VIRTIO_WIFI_CTRL_CMD_TERMINATE "CTRL_CMD_TERMINATE"
+#define VIRTIO_WIFI_CTRL_CMD_RELOAD_CONFIG "CTRL_CMD_RELOAD_CONFIG"
 
 // There is at most one active key in use.
 extern struct virtio_wifi_key_data get_active_ptk();
