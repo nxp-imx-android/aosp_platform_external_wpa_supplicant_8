@@ -465,50 +465,6 @@ static int virtio_wifi_set_ap(void *priv, struct wpa_driver_ap_params *params) {
 	return 0;
 }
 
-static int virtio_wifi_sta_deauth(void *priv, const u8 *own_addr, const u8 *addr,
-				 int reason)
-{
-	struct virtio_wifi_data *drv = priv;
-
-	struct ieee80211_mgmt mgmt;
-	int res;
-
-	memset(&mgmt, 0, sizeof(mgmt));
-	mgmt.frame_control = IEEE80211_FC(WLAN_FC_TYPE_MGMT,
-			WLAN_FC_STYPE_DEAUTH);
-	memcpy(mgmt.da, addr, ETH_ALEN);
-	memcpy(mgmt.sa, own_addr, ETH_ALEN);
-	memcpy(mgmt.bssid, own_addr, ETH_ALEN);
-	mgmt.u.deauth.reason_code = host_to_le16(reason);
-	res = socket_send(drv->sock, (u8*)&mgmt, IEEE80211_HDRLEN +
-			sizeof(mgmt.u.deauth));
-	handle_tx_callback(drv, (u8*)&mgmt, IEEE80211_HDRLEN +
-			sizeof(mgmt.u.deauth), 1);
-	return res;
-
-}
-
-static int virtio_wifi_sta_disassoc(void *priv, const u8 *own_addr, const u8 *addr,
-				 int reason)
-{
-	struct virtio_wifi_data *drv = priv;
-	struct ieee80211_mgmt mgmt;
-	int res;
-
-	memset(&mgmt, 0, sizeof(mgmt));
-	mgmt.frame_control = IEEE80211_FC(WLAN_FC_TYPE_MGMT,
-			WLAN_FC_STYPE_DISASSOC);
-	memcpy(mgmt.da, addr, ETH_ALEN);
-	memcpy(mgmt.sa, own_addr, ETH_ALEN);
-	memcpy(mgmt.bssid, own_addr, ETH_ALEN);
-	mgmt.u.disassoc.reason_code = host_to_le16(reason);
-	res = socket_send(drv->sock, (u8*)&mgmt, IEEE80211_HDRLEN +
-			sizeof(mgmt.u.disassoc));
-	handle_tx_callback(drv, (u8*)&mgmt, IEEE80211_HDRLEN +
-			sizeof(mgmt.u.disassoc), 1);
-	return res;
-}
-
 const struct wpa_driver_ops wpa_driver_virtio_wifi_ops = {
 	.name = "virtio_wifi",
 	.desc = "Qemu virtio WiFi",
@@ -519,8 +475,6 @@ const struct wpa_driver_ops wpa_driver_virtio_wifi_ops = {
 	.send_mlme = virtio_wifi_send_mlme,
 	.set_ap = virtio_wifi_set_ap,
 	.set_key = virtio_wifi_set_key,
-	.sta_deauth = virtio_wifi_sta_deauth,
-	.sta_disassoc = virtio_wifi_sta_disassoc,
 	.hapd_init = virtio_wifi_init,
 	.hapd_deinit = virtio_wifi_deinit,
 };
