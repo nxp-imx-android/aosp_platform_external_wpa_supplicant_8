@@ -78,11 +78,9 @@ static void handle_tx_eapol_callback(struct virtio_wifi_data *drv, const u8 *buf
 			       size_t len, int ok)
 {
 	struct ieee80211_hdr *hdr;
-	u16 fc;
 	union wpa_event_data event;
 
 	hdr = (struct ieee80211_hdr *) buf;
-	fc = le_to_host16(hdr->frame_control);
 
 	os_memset(&event, 0, sizeof(event));
 	event.eapol_tx_status.dst = hdr->addr1;
