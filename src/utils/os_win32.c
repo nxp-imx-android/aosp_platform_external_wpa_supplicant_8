@@ -216,6 +216,24 @@ char * os_readfile(const char *name, size_t *len)
 	return buf;
 }
 
+static wchar_t *s_convert_to_wchar(const char *utf8str) {
+    if (!utf8str) {
+        return NULL;
+    }
+    int len = MultiByteToWideChar(CP_UTF8, 0, utf8str, -1, NULL, 0);
+    wchar_t *wstr = os_zalloc(len * sizeof(wchar_t));
+    MultiByteToWideChar(CP_UTF8, 0, utf8str, -1, wstr, len);
+    return wstr;
+}
+
+FILE *os_fopen(const char *utf8filename, const char *mode) {
+    wchar_t *wmode = s_convert_to_wchar(mode);
+    wchar_t *wfilename = s_convert_to_wchar(utf8filename);
+    FILE *file = _wfopen(wfilename, wmode);
+    free(wfilename);
+    free(wmode);
+    return file;
+}
 
 int os_fdatasync(FILE *stream)
 {
