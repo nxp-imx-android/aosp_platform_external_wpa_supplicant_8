@@ -41,7 +41,7 @@ static int hostapd_config_read_vlan_file(struct hostapd_bss_config *bss,
 	int line = 0, vlan_id;
 	struct hostapd_vlan *vlan;
 
-	f = fopen(fname, "r");
+	f = os_fopen(fname, "r");
 	if (!f) {
 		wpa_printf(MSG_ERROR, "VLAN file '%s' not readable.", fname);
 		return -1;
@@ -179,7 +179,7 @@ static int hostapd_config_read_maclist(const char *fname,
 	u8 addr[ETH_ALEN];
 	int vlan_id;
 
-	f = fopen(fname, "r");
+	f = os_fopen(fname, "r");
 	if (!f) {
 		wpa_printf(MSG_ERROR, "MAC list file '%s' not found.", fname);
 		return -1;
@@ -320,7 +320,7 @@ static int hostapd_config_read_eap_user(const char *fname,
 #endif /* CONFIG_SQLITE */
 	}
 
-	f = fopen(fname, "r");
+	f = os_fopen(fname, "r");
 	if (!f) {
 		wpa_printf(MSG_ERROR, "EAP user file '%s' not found.", fname);
 		return -1;
@@ -4374,7 +4374,7 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 	int errors = 0;
 	size_t i;
 
-	f = fopen(fname, "r");
+	f = os_fopen(fname, "r");
 	if (f == NULL) {
 		wpa_printf(MSG_ERROR, "Could not open configuration file '%s' "
 			   "for reading.", fname);

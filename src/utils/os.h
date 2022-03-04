@@ -239,6 +239,12 @@ int os_unsetenv(const char *name);
  */
 char * os_readfile(const char *name, size_t *len);
 
+#ifdef _WIN32
+FILE *os_fopen(const char *utf8filename, const char *mode);
+#else
+#define os_fopen fopen
+#endif
+
 /**
  * os_file_exists - Check whether the specified file exists
  * @fname: Path and name of the file
