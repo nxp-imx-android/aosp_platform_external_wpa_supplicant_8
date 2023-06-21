@@ -886,11 +886,14 @@ std::vector<uint8_t>  generateRandomOweSsid()
 			"Available interfaces less than requested bands");
 	}
 	// start BSS on specified bands
+    // AP + AP: Enable 5GHz band AP first
+	std::size_t band_index = channelParamsListSize - 1;
 	for (std::size_t i = 0; i < channelParamsListSize; i ++) {
+	    band_index = band_index - i;
 		IfaceParams iface_params_new = iface_params;
 		NetworkParams nw_params_new = nw_params;
 		iface_params_new.name = managed_interfaces[i];
-
+        wpa_printf(MSG_INFO, "addConcurrentAccessPoints: Enable AP on band: %d", iface_params.channelParams[band_index].bandMask);
 		std::string owe_transition_ifname = "";
 		if (nw_params.encryptionType == EncryptionType::WPA3_OWE_TRANSITION) {
 			if (i == 0 && i+1 < channelParamsListSize) {
@@ -904,7 +907,7 @@ std::vector<uint8_t>  generateRandomOweSsid()
 		}
 
 		ndk::ScopedAStatus status = addSingleAccessPoint(
-		    iface_params_new, iface_params.channelParams[i], nw_params_new,
+		    iface_params_new, iface_params.channelParams[band_index], nw_params_new,
 		    br_name, owe_transition_ifname);
 		if (!status.isOk()) {
 			wpa_printf(MSG_ERROR, "Failed to addAccessPoint %s",
