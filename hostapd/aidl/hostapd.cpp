@@ -555,7 +555,12 @@ std::string CreateHostapdConfig(
 		}
 #ifdef CONFIG_IEEE80211AX
 		if (iface_params.hwModeParams.enable80211AX && !is_60Ghz_used) {
+			if(!is_2Ghz_band_only){
 			ht_cap_vht_oper_he_oper_chwidth_as_string += "he_oper_chwidth=1";
+			}
+			else {
+			ht_cap_vht_oper_he_oper_chwidth_as_string += "he_oper_chwidth=0";
+			}
 		}
 #endif
 		break;
